@@ -91,3 +91,19 @@ def pose_hide_low_conf(pose: Pose, confidence_threshold: float = 0.2) -> None:
     stacked_confidence = np.stack([mask, mask, mask], axis=3)
     masked_data = ma.masked_array(pose.body.data, mask=stacked_confidence)
     pose.body.data = masked_data
+
+
+def add_z_offsets_to_pose(pose: Pose, speed: float = 1.0) -> Pose:
+
+    offset = speed / pose.body.fps
+    # Assuming pose.data is a numpy masked array
+    pose_data = pose.body.data  # Shape: (frames, persons, keypoints, xyz)
+
+    # Create an offset array that only modifies the Z-dimension (index 2)
+    offsets = ma.arange(pose_data.shape[0]).reshape(-1, 1, 1, 1) * offset
+
+    # Apply the offsets only to the Z-axis (index 2), preserving masks
+    pose_data[:, :, :, 2] += offsets[:, :, :, 0]
+
+    pose.body.data = pose_data
+    return pose

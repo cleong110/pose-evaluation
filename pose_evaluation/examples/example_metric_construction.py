@@ -7,9 +7,12 @@ from pose_evaluation.metrics.distance_metric import DistanceMetric
 from pose_evaluation.metrics.dtw_metric import (
     DTWAggregatedPowerDistanceMeasure,
     DTWAggregatedScipyDistanceMeasure,
+    DTWDTAIImplementationDistanceMeasure,
 )
 from pose_evaluation.metrics.test_distance_metric import get_poses
 from pose_evaluation.metrics.pose_processors import (
+    GetHandsOnlyHolisticPoseProcessor,
+    InterpolateAllToSetFPSPoseProcessor,
     NormalizePosesProcessor,
     ZeroPadShorterPosesProcessor,
     HideLegsPosesProcessor,
@@ -128,8 +131,34 @@ if __name__ == "__main__":
         ),
     ]
 
+    dtw_mje_dtai_fast_hands = DistanceMetric(
+        "n-dtai-DTW-MJE_fast_hands_only",
+        distance_measure=DTWDTAIImplementationDistanceMeasure(use_fast=True),
+        pose_preprocessors=get_standard_pose_processors(
+            remove_world_landmarks=False,
+            reduce_poses_to_common_components=False,
+            remove_legs=False,
+            reduce_holistic_to_face_and_upper_body=False,
+            zero_pad_shorter=False,
+        ),
+    )
+    dtw_mje_dtai_fast_hands.add_preprocessor(GetHandsOnlyHolisticPoseProcessor())
+
+    dtw_mje_dtai_fast_fps15 = DistanceMetric(
+        "n-dtai-DTW-MJE_fast_fps15",
+        distance_measure=DTWDTAIImplementationDistanceMeasure(use_fast=True),
+        pose_preprocessors=get_standard_pose_processors(
+            remove_world_landmarks=False,
+            reduce_poses_to_common_components=False,
+            remove_legs=False,
+            reduce_holistic_to_face_and_upper_body=False,
+            zero_pad_shorter=False,
+        ),
+    )
+    dtw_mje_dtai_fast_fps15.add_preprocessor(InterpolateAllToSetFPSPoseProcessor())
+
     # Evaluate each metric on the test poses
-    for metric in metrics:
+    for metric in [dtw_mje_dtai_fast_fps15]:
         print("*" * 10)
         print(metric.name)
 

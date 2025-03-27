@@ -27,6 +27,7 @@ TensorConvertableType = Union[List, np.ndarray, Tensor]
 class EmbeddingDistanceMetric(EmbeddingMetric):
     def __init__(
         self,
+        model: str,
         kind: ValidDistanceKinds = "cosine",
         device: Optional[Union[torch.device, str]] = None,
         dtype=None,
@@ -39,7 +40,7 @@ class EmbeddingDistanceMetric(EmbeddingMetric):
             dtype (torch.dtype): The data type to use for tensors.
                 If None, uses torch.get_default_dtype()
         """
-        super().__init__(f"EmbeddingDistanceMetric {kind}", higher_is_better=False)
+        super().__init__(f"EmbeddingDistanceMetric_{model}_{kind}", higher_is_better=False)
         self.kind = kind
         if device is None:
             self.device = torch.device(st_util.get_device_name())
@@ -50,6 +51,7 @@ class EmbeddingDistanceMetric(EmbeddingMetric):
             dtype = torch.get_default_dtype()
 
         self.dtype = dtype
+        self.model = model
 
         # Dispatch table for metric computations
         self._metric_dispatch = {
