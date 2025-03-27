@@ -7,7 +7,9 @@ import plotly.express as px
 if __name__ == "__main__":
 
     # stats_folder = Path(r"C:\Users\Colin\data\similar_but_not_the_same\similar_sign_analysis\scores")
-    stats_folder = Path(r"C:\Users\Colin\data\similar_but_not_the_same\similar_sign_analysis_with_times\scores")
+    # stats_folder = Path(r"C:\Users\Colin\data\similar_but_not_the_same\similar_sign_analysis_with_times\scores")
+    # stats_folder = Path(r"C:\Users\Colin\data\similar_but_not_the_same\embedding_analysis\scores")
+    stats_folder = Path(r"C:\Users\Colin\data\similar_but_not_the_same\combined_embedding_and_pose_stats\scores")
 
     known_similar_pairs_df = pd.read_csv(stats_folder.parent.parent / "similar_sign_pairs.csv")
     known_similar_pairs_df["gloss_tuple"] = known_similar_pairs_df.apply(
@@ -16,6 +18,7 @@ if __name__ == "__main__":
     known_similar_gloss_tuples = known_similar_pairs_df["gloss_tuple"].unique().tolist()
 
     analysis_folder = stats_folder.parent / "score_analysis"
+    analysis_folder.mkdir(exist_ok=True)
 
     csv_stats_dfs = []
     for csv_file in tqdm(stats_folder.glob("*.csv"), desc="Loading stats csvs"):
@@ -111,6 +114,7 @@ if __name__ == "__main__":
         out_of_class_gloss_stats["known_similar"] = out_of_class_gloss_stats["gloss_tuple"].isin(
             known_similar_gloss_tuples
         )
+        out_of_class_gloss_stats["metric"] = metric
 
         print(f"Gloss Stats for {metric} (not self-score)")
         print(out_of_class_gloss_stats)
@@ -212,7 +216,6 @@ if __name__ == "__main__":
         out_of_class_gloss_stats.to_csv(analysis_folder / f"{metric}_out_of_class_scores_by_gloss.csv", index=False)
         metric_most_similar_glosses.to_csv(analysis_folder / f"{metric}_most_similar_glosses.csv", index=False)
         metric_least_similar_glosses.to_csv(analysis_folder / f"{metric}_least_similar_glosses.csv", index=False)
-
         metric_most_consistent_glosses.to_csv(analysis_folder / f"{metric}_most_consistent_glosses.csv", index=False)
         metric_least_consistent_glosses.to_csv(analysis_folder / f"{metric}_least_consistent_glosses.csv", index=False)
 
