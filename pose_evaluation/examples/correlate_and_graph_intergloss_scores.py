@@ -1,10 +1,13 @@
 from itertools import combinations
+import math
 from pathlib import Path
 from typing import Optional
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from tqdm import tqdm
 import seaborn as sns
+import gc
 
 sns.set_theme()
 import matplotlib.pyplot as plt
@@ -59,10 +62,64 @@ def plot_metric_histogram(
     if out_path:
         plt.tight_layout()
         plt.savefig(out_path)
+    plt.close()
+
+
+def plot_metric_scatter_interactive(
+    df: pd.DataFrame, metric_x: str, metric_y: str, show: bool = False, html_path: Optional[Path] = None
+):
+    # Filter for the two specified metrics
+    df_x = df[df["metric"] == metric_x].rename(columns={"mean": "score_x"})
+    df_y = df[df["metric"] == metric_y].rename(columns={"mean": "score_y"})
+
+    # Merge on Gloss A and Gloss B
+    merged_df = df_x.merge(df_y, on=["Gloss A", "Gloss B"], suffixes=("", "_y"))
+
+    # Create labels
+    merged_df["label"] = merged_df["Gloss A"] + " / " + merged_df["Gloss B"]
+
+    # Create scatter plot without labels
+    fig = px.scatter(
+        merged_df,
+        x="score_x",
+        y="score_y",
+        color="known_similar",  # Color by 'known_similar' column
+        title=f"{metric_x} vs {metric_y}",
+        labels={"score_x": metric_x, "score_y": metric_y},
+        color_continuous_scale="Viridis",
+    )
+
+    # Add text labels as a separate trace with legend entry
+    text_trace = go.Scatter(
+        x=merged_df["score_x"],
+        y=merged_df["score_y"],
+        text=merged_df["label"],
+        mode="text",
+        textposition="top center",
+        name="Labels",  # Separate legend entry
+        showlegend=True,  # Allow toggling via legend
+    )
+
+    fig.add_trace(text_trace)
+
+    # Improve layout
+    fig.update_traces(marker=dict(size=8, opacity=0.7))
+    fig.update_layout(
+        xaxis_title=metric_x,
+        yaxis_title=metric_y,
+        hovermode="closest",
+    )
+
+    if show:
+        fig.show()
+    if html_path:
+        fig.write_html(html_path)
+
+    del fig
 
 
 def plot_metric_scatter(
-    df: pd.DataFrame, metric_x: str, metric_y: str, show: bool = False, html_path: Optional[Path] = None
+    df: pd.DataFrame, metric_x: str, metric_y: str, show: bool = False, png_path: Optional[Path] = None
 ):
     # Filter for the two specified metrics
     df_x = df[df["metric"] == metric_x].rename(columns={"mean": "score_x"})
@@ -74,30 +131,6 @@ def plot_metric_scatter(
 
     # Create labels
     merged_df["label"] = merged_df["Gloss A"] + " / " + merged_df["Gloss B"]
-    # print(merged_df[["Gloss A", "Gloss B", "score_x", "score_y", "metric", "metric_y"]].head())
-    # print(merged_df[["Gloss A", "Gloss B", "score_x", "score_y", "metric", "metric_y"]].tail())
-    # print(merged_df[["score_x", "score_y"]].describe())  # Check min/max values
-
-    fig = px.scatter(
-        merged_df,
-        x="score_x",
-        y="score_y",
-        text="label",
-        title=f"{metric_x} vs {metric_y}",
-        color="known_similar",  # Color by the 'known_similar' column,
-        labels={"score_x": metric_x, "score_y": metric_y},
-        color_continuous_scale="Viridis",  # You can change the color scale
-    )
-
-    # Improve layout for readability
-    fig.update_traces(textposition="top center", marker=dict(size=8, opacity=0.7))
-    fig.update_layout(xaxis_title=metric_x, yaxis_title=metric_y, hovermode="closest")
-
-    if show:
-        fig.show()
-    if html_path:
-        fig.write_html(html_path)
-
     plt.figure(figsize=(8, 6))  # Set figure size
     sns.scatterplot(
         data=merged_df,
@@ -115,9 +148,11 @@ def plot_metric_scatter(
     # plt.show()
     if show:
         plt.show()
-    if html_path:
+    if png_path:
         plt.tight_layout()
-        plt.savefig(html_path.with_suffix(".png"))
+        plt.savefig(png_path.with_suffix(".png"))
+
+    plt.close()
 
 
 if __name__ == "__main__":
@@ -159,21 +194,38 @@ if __name__ == "__main__":
     # ('FAVORITE', 'TASTE')	928	0.181375090739336	0.422960162162781	0.031768798828125	0.0689190830802117	True	EmbeddingDistanceMetric_sem-lex_cosine	10
 
     metrics = scores_by_gloss_df["metric"].unique().tolist()
-    print(f"We have intragloss scores for {len(metrics)} metrics")
+    correlation_plots_folder = plots_folder / "metric_correlations"
+    histogram_plots_folder = plots_folder / "metric_histograms"
+    correlation_plots_folder.mkdir(exist_ok=True)
+    histogram_plots_folder.mkdir(exist_ok=True)
 
-    for metric1, metric2 in combinations(metrics, 2):
+    combinations_count = math.comb(len(metrics), 2)
+    print(f"We have intergloss scores for {len(metrics)} metrics, so there are {combinations_count} combinations")
+
+    for metric1, metric2 in tqdm(
+        combinations(metrics, 2), desc="generating correlation plots", total=combinations_count
+    ):
         plot_metric_scatter(
             scores_by_gloss_df,
             metric1,
             metric2,
             show=False,
-            html_path=plots_folder / f"{metric1}_versus_{metric2}.html",
+            png_path=correlation_plots_folder / f"{metric1}_versus_{metric2}.png",
         )
+        plot_metric_scatter_interactive(
+            scores_by_gloss_df,
+            metric1,
+            metric2,
+            show=False,
+            html_path=correlation_plots_folder / f"{metric1}_versus_{metric2}.html",
+        )
+        gc.collect()
 
-    for metric in metrics:
+    for metric in tqdm(metrics, desc="Generating histogram plots"):
         plot_metric_histogram(
             scores_by_gloss_df,
             metric=metric,
             col="mean",
-            out_path=plots_folder / f"{metric}_intragloss_hist.png",
+            out_path=histogram_plots_folder / f"{metric}_intergloss_hist.png",
         )
+        gc.collect()
