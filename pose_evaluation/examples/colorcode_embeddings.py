@@ -217,6 +217,7 @@ def visualize_embeddings(
         plt.show()
     if out_path:
         print(f"Saving figure to {out_path}")
+        plt.tight_layout()
         plt.savefig(out_path)
 
 
@@ -306,6 +307,17 @@ def visualize_embeddings_for_gloss(
     )
 
 
+def get_regions(min_val, max_val, divisions):
+    # Calculate the step size for the specified number of divisions
+    step = (max_val - min_val) // divisions
+
+    # Generate regions as tuples of start and end indices
+    for i in range(divisions):
+        start = min_val + i * step
+        end = start + step
+        yield (start, end)
+
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Show color-coded embeddings for gloss")
@@ -317,6 +329,7 @@ if __name__ == "__main__":
     parser.add_argument("--embedding_count", type=int)
     parser.add_argument("--dim_min", type=int, default=0)
     parser.add_argument("--dim_max", type=int, default=768)
+    parser.add_argument("--divisions", type=int, default=1)
     parser.add_argument("--out_folder", type=Path)
     args = parser.parse_args()
 
@@ -345,13 +358,20 @@ if __name__ == "__main__":
     #         show=args.show,
     #         out_folder=args.out_folder,
     #     )
-    visualize_embeddings_for_multiple_glosses(
-        df,
-        model=model,
-        gloss_list=glosses,
-        embedding_count=args.embedding_count,
-        dim_min=args.dim_min,
-        dim_max=args.dim_max,
-        show=args.show,
-        out_folder=args.out_folder,
-    )
+
+    out_dir = args.out_folder / "_".join(glosses)
+    out_dir.mkdir(exist_ok=True)
+    # https://github.com/lazyprogrammer/machine_learning_examples/blob/master/nlp_class2/word2vec.py
+
+    for dim_min, dim_max in get_regions(args.dim_min, args.dim_max, divisions=args.divisions):
+
+        visualize_embeddings_for_multiple_glosses(
+            df,
+            model=model,
+            gloss_list=glosses,
+            embedding_count=args.embedding_count,
+            dim_min=dim_min,
+            dim_max=dim_max,
+            show=args.show,
+            out_folder=args.out_folder / "_".join(glosses),
+        )
