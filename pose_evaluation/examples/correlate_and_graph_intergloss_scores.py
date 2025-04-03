@@ -55,7 +55,7 @@ def plot_metric_histogram(
     # Labels and title
     plt.xlabel(f"{col} Value", fontsize=12)
     plt.ylabel("Frequency", fontsize=12)
-    plt.title(f"Mean Intragloss ({metric})", fontsize=14)
+    plt.title(f"Mean Intergloss ({metric})", fontsize=14)
 
     if show:
         plt.show()
@@ -142,7 +142,7 @@ def plot_metric_scatter(
     )  # Use seaborn's scatterplot
     plt.xlabel(f"{metric_x}")
     plt.ylabel(f"{metric_y}")
-    plt.title(f"Mean Intragloss Scores:\n{metric_x} vs\n {metric_y}")
+    plt.title(f"Mean Intergloss Scores:\n{metric_x} vs\n {metric_y}")
     plt.grid(True)  # Add grid for readability
 
     # plt.show()
@@ -153,6 +153,12 @@ def plot_metric_scatter(
         plt.savefig(png_path.with_suffix(".png"))
 
     plt.close()
+
+
+def create_gloss_tuple(row):
+    gloss_1 = row["subject"].split(":")[-1].upper()  # Extract and capitalize subject gloss
+    gloss_2 = row["object"].split(":")[-1].upper()  # Extract and capitalize object gloss
+    return tuple(sorted([gloss_1, gloss_2], reverse=True))  # Sort and create tuple
 
 
 if __name__ == "__main__":
@@ -179,6 +185,25 @@ if __name__ == "__main__":
     )
     print(scores_by_gloss_df.info())
     print(scores_by_gloss_df.head())
+
+    ################################################################
+    # Adding the ASL Knowledge Graph: alas, none of these are in here.
+    # asl_knowledge_graph_df = pd.read_csv(score_analysis_folder.parent.parent / "edges_v2_noweights.tsv", delimiter="\t")
+    # # get the "response" relation
+    # asl_knowledge_graph_df = asl_knowledge_graph_df[asl_knowledge_graph_df["relation"] == "response"]
+
+    # # add gloss_tuple
+    # asl_knowledge_graph_df["gloss_tuple"] = asl_knowledge_graph_df.apply(create_gloss_tuple, axis=1)
+    # print(asl_knowledge_graph_df.info())
+    # print(asl_knowledge_graph_df.head())
+
+    # # gloss_tuple_set = set(asl_knowledge_graph_df["gloss_tuple"])
+    # scores_by_gloss_df["semantically_related"] = scores_by_gloss_df["gloss_tuple"].isin(
+    #     set(asl_knowledge_graph_df["gloss_tuple"])
+    # )
+    # print(set(asl_knowledge_graph_df["gloss_tuple"]).intersection(set(scores_by_gloss_df["gloss_tuple"])))
+    # print(scores_by_gloss_df[scores_by_gloss_df["semantically_related"] == True])
+    # exit()
 
     # Example:EmbeddingDistanceMetric_sem-lex_cosine_out_of_class_scores_by_gloss.csv
     # gloss_tuple	count	mean	max	min	std	known_similar	metric	rank
