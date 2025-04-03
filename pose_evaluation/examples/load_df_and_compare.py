@@ -23,8 +23,11 @@ from pose_evaluation.metrics.pose_processors import (
     GetHandsOnlyHolisticPoseProcessor,
     InterpolateAllToSetFPSPoseProcessor,
     ReduceHolisticPoseProcessor,
+    SetZToZeroProcessor,
     ZeroPadShorterPosesProcessor,
     AddTOffsetsToZPoseProcessor,
+    AddFramebasedOffsetToZPoseProcessor,
+    SetZToTPoseProcessor,
     get_standard_pose_processors,
 )
 
@@ -202,22 +205,58 @@ def get_metrics():
     dtw_mje_dtai_fast_hands_z_offsets_fps_15.add_preprocessor(GetHandsOnlyHolisticPoseProcessor())
     dtw_mje_dtai_fast_hands_z_offsets_fps_15.add_preprocessor(InterpolateAllToSetFPSPoseProcessor(fps=15))
 
+    dtw_mje_dtai_fast_hands_xyt = DistanceMetric(
+        "dtw_mje_dtai_fast_hands_xyt",
+        distance_measure=DTWDTAIImplementationDistanceMeasure(use_fast=True),
+        pose_preprocessors=get_standard_pose_processors(
+            normalize_poses=False,
+            remove_world_landmarks=False,
+            reduce_poses_to_common_components=False,
+            remove_legs=False,
+            reduce_holistic_to_face_and_upper_body=False,
+            zero_pad_shorter=False,
+        ),
+    )
+    dtw_mje_dtai_fast_hands_xyt.add_preprocessor(SetZToTPoseProcessor())
+    dtw_mje_dtai_fast_hands_xyt.add_preprocessor(NormalizePosesProcessor())
+    dtw_mje_dtai_fast_hands_xyt.add_preprocessor(GetHandsOnlyHolisticPoseProcessor())
+
+    dtw_mje_dtai_fast_hands_xy0 = DistanceMetric(
+        "dtw_mje_dtai_fast_hands_xy0",
+        distance_measure=DTWDTAIImplementationDistanceMeasure(use_fast=True),
+        pose_preprocessors=get_standard_pose_processors(
+            normalize_poses=False,
+            remove_world_landmarks=False,
+            reduce_poses_to_common_components=False,
+            remove_legs=False,
+            reduce_holistic_to_face_and_upper_body=False,
+            zero_pad_shorter=False,
+        ),
+    )
+    dtw_mje_dtai_fast_hands_xy0.add_preprocessor(SetZToZeroProcessor())
+    dtw_mje_dtai_fast_hands_xy0.add_preprocessor(NormalizePosesProcessor())
+    dtw_mje_dtai_fast_hands_xy0.add_preprocessor(GetHandsOnlyHolisticPoseProcessor())
+
     metrics = [
         dtw_mje_dtai_fast_hands_z_offsets,
         dtw_mje_dtai_fast_hands_z_offsets_fps_15,
         dtw_mje_dtai_fast,
-        # dtw_mje_dtai_slow, # literally takes hours
-        nmje,
-        nmje_120fps,
-        mje,
         dtw_mje_dtai_fast_hands,
+        # variations on above
         dtw_mje_dtai_fast_fps15,
         dtw_mje_dtai_fast_fps120,
         dtw_mje_dtai_fast_hands_fps15,
         dtw_mje_dtai_fast_hands_fps120,
-        dtw_mje_optimized,
-        dtw_mje,
-        dtw_mje_scipy,
+        # dtw_mje_dtai_slow, # literally takes hours
+        # nmje,
+        # nmje_120fps,
+        # mje,
+        # slow ones below
+        # dtw_mje_optimized,
+        # dtw_mje,
+        # dtw_mje_scipy,
+        dtw_mje_dtai_fast_hands_xyt,
+        dtw_mje_dtai_fast_hands_xy0,
     ]
 
     return metrics
@@ -255,7 +294,11 @@ if __name__ == "__main__":
 
     metrics = get_metrics()
 
-    for index, row in tqdm(similar_sign_pairs_df.iterrows(), desc="Evaluating metrics on similar-sign pairs"):
+    for index, row in tqdm(
+        similar_sign_pairs_df.iterrows(),
+        desc="Evaluating metrics on similar-sign pairs",
+        total=len(similar_sign_pairs_df),
+    ):
 
         gloss_a = row["signA"]
         gloss_b = row["signB"]
@@ -288,6 +331,7 @@ if __name__ == "__main__":
             for pose_path in tqdm(
                 not_a_or_b_pose_paths,
                 desc="loading files for 'not either'",
+                disable=True,
             )
         ]
 

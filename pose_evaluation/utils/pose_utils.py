@@ -107,3 +107,42 @@ def add_z_offsets_to_pose(pose: Pose, speed: float = 1.0) -> Pose:
 
     pose.body.data = pose_data
     return pose
+
+
+def add_framebased_fixed_offset_to_z(pose: Pose, offset=1) -> Pose:
+    # Assuming pose.data is a numpy masked array
+    pose_data = pose.body.data  # Shape: (frames, persons, keypoints, xyz)
+
+    # Create an offset array that only modifies the Z-dimension (index 2)
+    offsets = ma.arange(pose_data.shape[0]).reshape(-1, 1, 1, 1) * offset
+
+    # Apply the offsets only to the Z-axis (index 2), preserving masks
+    pose_data[:, :, :, 2] += offsets[:, :, :, 0]
+
+    pose.body.data = pose_data
+    return pose
+
+
+def set_z_to_frame_index(pose: Pose) -> Pose:
+    # Assuming pose.data is a numpy masked array
+    pose_data = pose.body.data  # Shape: (frames, persons, keypoints, xyz)
+
+    # Create an array where the Z-dimension (index 2) is set to the frame index
+    frame_indices = ma.arange(pose_data.shape[0]).reshape(-1, 1, 1, 1)
+
+    # Assign the frame index to the Z-axis (index 2), preserving masks
+    pose_data[:, :, :, 2] = frame_indices[:, :, :, 0]
+
+    pose.body.data = pose_data
+    return pose
+
+
+def set_z_to_zero(pose: Pose) -> Pose:
+    # Assuming pose.data is a numpy masked array
+    pose_data = pose.body.data  # Shape: (frames, persons, keypoints, xyz)
+
+    # Set all Z values to zero
+    pose_data[:, :, :, 2] = 0
+
+    pose.body.data = pose_data
+    return pose

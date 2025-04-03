@@ -6,9 +6,12 @@ from pose_format import Pose
 from pose_format.utils.generic import pose_hide_legs, reduce_holistic
 from pose_evaluation.metrics.base import Signature
 from pose_evaluation.utils.pose_utils import (
+    set_z_to_frame_index,
+    set_z_to_zero,
     zero_pad_shorter_poses,
     reduce_poses_to_intersection,
     add_z_offsets_to_pose,
+    add_framebased_fixed_offset_to_z,
 )
 
 PosesTransformerFunctionType = Callable[[Iterable[Pose]], List[Pose]]
@@ -146,6 +149,32 @@ class AddTOffsetsToZPoseProcessor(PoseProcessor):
 
     def process_pose(self, pose: Pose) -> Pose:
         return add_z_offsets_to_pose(pose)
+
+
+class AddFramebasedOffsetToZPoseProcessor(PoseProcessor):
+
+    def __init__(self, name="z_plus_framebased_offset", offset=1) -> None:
+        super().__init__(name)
+        self.offset = offset
+
+    def process_pose(self, pose: Pose) -> Pose:
+        return add_framebased_fixed_offset_to_z(pose, self.offset)
+
+
+class SetZToTPoseProcessor(PoseProcessor):
+    def __init__(self, name="xyz_to_xyt") -> None:
+        super().__init__(name)
+
+    def process_pose(self, pose: Pose) -> Pose:
+        return set_z_to_frame_index(pose)
+
+
+class SetZToZeroProcessor(PoseProcessor):
+    def __init__(self, name="xyz_to_xy0") -> None:
+        super().__init__(name)
+
+    def process_pose(self, pose: Pose) -> Pose:
+        return set_z_to_zero(pose)
 
 
 def get_standard_pose_processors(  # pylint: disable=too-many-arguments,too-many-positional-arguments
