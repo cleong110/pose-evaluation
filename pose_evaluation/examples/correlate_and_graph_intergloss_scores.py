@@ -164,9 +164,10 @@ def create_gloss_tuple(row):
 if __name__ == "__main__":
 
     # score_analysis_folder = Path(r"C:\Users\Colin\data\similar_but_not_the_same\embedding_analysis\score_analysis")
-    score_analysis_folder = Path(
-        r"C:\Users\Colin\data\similar_but_not_the_same\combined_embedding_and_pose_stats\score_analysis"
-    )
+    # score_analysis_folder = Path(
+    #     r"C:\Users\Colin\data\similar_but_not_the_same\combined_embedding_and_pose_stats\score_analysis"
+    # )
+    score_analysis_folder = Path(r"C:\Users\Colin\data\similar_but_not_the_same\nonsense_metrics\score_analysis")
     plots_folder = score_analysis_folder / "plots"
     plots_folder.mkdir(exist_ok=True)
     # EmbeddingDistanceMetric_sem-lex_cosine_out_of_class_scores_by_gloss.csv

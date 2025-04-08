@@ -35,9 +35,10 @@ def plot_metric_traces(df: pd.DataFrame, column_name: str, title="") -> go.Figur
 
 if __name__ == "__main__":
 
-    analysis_folder = Path(
-        r"C:\Users\Colin\data\similar_but_not_the_same\combined_embedding_and_pose_stats\score_analysis"
-    )
+    # analysis_folder = Path(
+    #     r"C:\Users\Colin\data\similar_but_not_the_same\combined_embedding_and_pose_stats\score_analysis"
+    # )
+    analysis_folder = Path(r"C:\Users\Colin\data\similar_but_not_the_same\nonsense_metrics\score_analysis")
 
     stats_csvs = analysis_folder.glob("stats_by_metric_at_k*.csv")
 

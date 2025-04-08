@@ -117,16 +117,16 @@ if __name__ == "__main__":
             ), f"{csv_file} + {file_similar_pair}"
             # assert file_similar_pair[1] in str(csv_file)
 
-            csv_kmeans_df = csv_stats_df[csv_stats_df["Gloss B"] != file_similar_pair[1]]
+            csv_kmeans_df = csv_stats_df[csv_stats_df["Gloss B"] != file_similar_pair[1]].copy()
             # print(csv_stats_df)
             # print(csv_kmeans_df)
             # print(csv_kmeans_df["Gloss A"].unique())
             # print(csv_kmeans_df["Gloss B"].unique())
             file_self_scores = csv_kmeans_df[csv_kmeans_df["Gloss A"] == csv_kmeans_df["Gloss B"]]
-            file_intraclass_scores = csv_kmeans_df[csv_kmeans_df["Gloss A"] != csv_kmeans_df["Gloss B"]]
+            file_interclass_scores = csv_kmeans_df[csv_kmeans_df["Gloss A"] != csv_kmeans_df["Gloss B"]]
             # print(len(file_self_scores))
             # print(len(file_intraclass_scores))
-            csv_kmeans_df["Experiment ID"] = i
+            csv_kmeans_df.loc[:, "Experiment ID"] = i
             csv_kmeans_df = csv_kmeans_df.drop(columns=["Unnamed: 0"])
             csv_kmeans_df = csv_kmeans_df.sort_values("score", ascending=True)
             known_similar_pairs_df["gloss_tuple"] = known_similar_pairs_df.apply(
@@ -141,15 +141,27 @@ if __name__ == "__main__":
             # pull out self-scores for samples
             csv_kmeans_df = csv_kmeans_df[csv_kmeans_df["Gloss A Filename"] != csv_kmeans_df["Gloss B Filename"]]
 
-            top_k_df = csv_kmeans_df.groupby("Gloss A Filename", group_keys=False).apply(  # Group first
-                lambda g: g.sort_values(by="score", ascending=True).head(k)
-            )  # Sort within each group
-            # print(top_k_df[["Gloss A", "Gloss B", "score", "Gloss A Filename", "Gloss B Filename"]])
-            summary_df = (
+            # top_k_df = csv_kmeans_df.groupby("Gloss A Filename", group_keys=False).apply(  # Group first
+            #     lambda g: g.sort_values(by="score", ascending=True).head(k)
+            # )  # Sort within each group
+            # pd.options.mode.chained_assignment = None  # Disable warning (use cautiously)
+            top_k_df = (
                 csv_kmeans_df.groupby("Gloss A Filename", group_keys=False)
-                .apply(compute_retrieval_stats, k)
+                .apply(lambda g: g.drop(columns=["Gloss A Filename"]).sort_values(by="score", ascending=True).head(k))
                 .reset_index()
             )
+            # print(top_k_df[["Gloss A", "Gloss B", "score", "Gloss A Filename", "Gloss B Filename"]])
+            # summary_df = (
+            #     csv_kmeans_df.groupby("Gloss A Filename", group_keys=False)
+            #     .apply(compute_retrieval_stats, k)
+            #     .reset_index()
+            # )
+            summary_df = (
+                csv_kmeans_df.groupby("Gloss A Filename", group_keys=False)
+                .apply(lambda g: compute_retrieval_stats(g.drop(columns=["Gloss A Filename"]), k))
+                .reset_index()
+            )
+            # pd.options.mode.chained_assignment = "warn"  # Disable warning (use cautiously)
             # print(summary_df)
             top_k_df.to_csv(k_analysis_folder / f"{csv_file.stem}_grouped_results.csv")
             summary_df["metric"] = csv_stats_df["metric"]
