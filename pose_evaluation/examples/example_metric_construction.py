@@ -21,6 +21,10 @@ from pose_evaluation.metrics.nonsense_measures import (
     AbsMeanCoordinateValueMeasure,
     CountSevensMeasure,
 )
+from pose_evaluation.metrics.dtw_metric import (
+    DTWAggregatedPowerDistanceMeasure,
+    DTWAggregatedScipyDistanceMeasure,
+)
 from pose_evaluation.metrics.test_distance_metric import get_poses
 from pose_evaluation.metrics.pose_processors import (
     GetHandsOnlyHolisticPoseProcessor,
@@ -113,7 +117,34 @@ if __name__ == "__main__":
         # (adapting to MediaPipe Holistic keypoints format instead of OpenPose)
         DistanceMetric(
             "AveragePositionError",
+            "AveragePositionError",
             AggregatedPowerDistance(order=2, aggregation_strategy="mean", default_distance=0),
+            pose_preprocessors=[
+                NormalizePosesProcessor(),
+                HideLegsPosesProcessor(),
+                ZeroPadShorterPosesProcessor(),
+                ReduceHolisticPoseProcessor(),
+            ],
+        ),
+        # Recreating Dynamic Time Warping - Mean Joint Error
+        # As before, only now we use the Dynamic Time Warping version!
+        DistanceMetric(
+            "DTWPowerDistance",
+            DTWAggregatedPowerDistanceMeasure(aggregation_strategy="mean", default_distance=0.0, order=2),
+            pose_preprocessors=get_standard_pose_processors(
+                zero_pad_shorter=False, reduce_holistic_to_face_and_upper_body=True
+            ),
+        ),
+        # We can also implement a version that uses scipy distances "cdist"
+        # This lets us experiment with e.g. jaccard
+        # Options are listed at the documentation for scipy:
+        # https://docs.scipy.org/doc/scipy-1.15.0/reference/generated/scipy.spatial.distance.cdist.html
+        DistanceMetric(
+            "DTWScipyDistance",
+            DTWAggregatedScipyDistanceMeasure(aggregation_strategy="mean", default_distance=0.0, metric="jaccard"),
+            pose_preprocessors=get_standard_pose_processors(
+                zero_pad_shorter=False, reduce_holistic_to_face_and_upper_body=True
+            ),
             pose_preprocessors=[
                 NormalizePosesProcessor(),
                 HideLegsPosesProcessor(),
@@ -212,6 +243,15 @@ if __name__ == "__main__":
     ]:
         print("*" * 10)
         print("\nMETRIC NAME: ")
+        print(metric.name)
+
+        print("\nMETRIC __str__: ")
+        print(str(metric))
+
+        print("\nMETRIC to repr: ")
+        print(repr(metric))
+
+        print("\nSIGNATURE: ")
         print(metric.name)
 
         print("\nMETRIC __str__: ")
