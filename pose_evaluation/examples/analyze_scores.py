@@ -52,10 +52,12 @@ def mean_correct_and_total_population_sizes_per_gloss(df: pd.DataFrame) -> Tuple
     unique_queries = df["Gloss A Path"].unique()
 
     # Create lists for population sizes and correct sizes
+
     pop_sizes = []
     correct_sizes = []
 
     for query_path in tqdm(unique_queries, "calculating population sizes"):
+
         # Find all rows where this query appears in EITHER column
         relevant_rows = df[(df["Gloss A Path"] == query_path) | (df["Gloss B Path"] == query_path)].copy()
 
@@ -260,8 +262,11 @@ if __name__ == "__main__":
     # stats_folder = Path(r"C:\Users\Colin\data\similar_but_not_the_same\similar_sign_analysis\scores")
     # stats_folder = Path(r"C:\Users\Colin\data\similar_but_not_the_same\similar_sign_analysis_with_times\scores")
     # stats_folder = Path(r"C:\Users\Colin\data\similar_but_not_the_same\embedding_analysis\scores")
-    stats_folder = Path(r"C:\Users\Colin\data\similar_but_not_the_same\combined_embedding_and_pose_stats\scores")
+    # stats_folder = Path(r"C:\Users\Colin\data\similar_but_not_the_same\combined_embedding_and_pose_stats\scores")
     # stats_folder = Path(r"C:\Users\Colin\data\similar_but_not_the_same\what_the_heck_why_pop\scores")
+    stats_folder = Path(r"C:\Users\Colin\data\similar_but_not_the_same\nonsense_metrics\scores")
+
+    pop_sizes = False
 
     # TODO: check if the number of CSVs has changed. If not, load deduplicated.
 
@@ -508,36 +513,38 @@ if __name__ == "__main__":
         # correct_count = (filtered_group["Gloss A"] == filtered_group["Gloss B"]).sum()
         # print(f"Correct matches for {example_path}:", correct_count)
         ########################
-
-        mean_correct_pop_full, mean_total_pop_full = mean_correct_and_total_population_sizes_per_gloss(metric_df)
-        metric_stats["mean correct items in query population including known similar"].append(mean_correct_pop_full)
-        metric_stats["mean total items in query population including known similar"].append(mean_total_pop_full)
-        print(
-            f"Average {metric} query population including known-similar signs: {mean_total_pop_full}, of which {mean_correct_pop_full} are correct"
-        )
-
         metric_df_excluding_known_similar = metric_df[metric_df["known_similar"] == False]
-        mean_correct_pop_excluding_known_similar, mean_total_pop_excluding_known_similar = (
-            mean_correct_and_total_population_sizes_per_gloss(metric_df_excluding_known_similar)
-        )
-        metric_stats["mean correct items in query population excluding known similar"].append(
-            mean_correct_pop_excluding_known_similar
-        )
-        metric_stats["mean total items in query population excluding known similar"].append(
-            mean_total_pop_excluding_known_similar
-        )
-        print(
-            f"Average {metric} query population excluding known-similar signs: {mean_total_pop_excluding_known_similar}, of which {mean_correct_pop_excluding_known_similar} are correct"
-        )
+        if pop_sizes:
 
-        for k in tqdm(range(1, 11), desc="Calculating recall metrics at k"):
+            mean_correct_pop_full, mean_total_pop_full = mean_correct_and_total_population_sizes_per_gloss(metric_df)
+            metric_stats["mean correct items in query population including known similar"].append(mean_correct_pop_full)
+            metric_stats["mean total items in query population including known similar"].append(mean_total_pop_full)
+            print(
+                f"Average {metric} query population including known-similar signs: {mean_total_pop_full}, of which {mean_correct_pop_full} are correct"
+            )
+
+            mean_correct_pop_excluding_known_similar, mean_total_pop_excluding_known_similar = (
+                mean_correct_and_total_population_sizes_per_gloss(metric_df_excluding_known_similar)
+            )
+            metric_stats["mean correct items in query population excluding known similar"].append(
+                mean_correct_pop_excluding_known_similar
+            )
+            metric_stats["mean total items in query population excluding known similar"].append(
+                mean_total_pop_excluding_known_similar
+            )
+            print(
+                f"Average {metric} query population excluding known-similar signs: {mean_total_pop_excluding_known_similar}, of which {mean_correct_pop_excluding_known_similar} are correct"
+            )
+
+        for k in tqdm(range(1, 11), desc="Calculating retrieval metrics at k"):
 
             # including known_similar
             metric_stats_at_k["metric"].append(metric)
             metric_stats_at_k["metric_signature"].append(signatures[0])
             metric_stats_at_k["k"].append(k)
-            metric_stats_at_k["Mean Total Pop Size"].append(mean_total_pop_full)
-            metric_stats_at_k["Mean Correct Pop Size"].append(mean_correct_pop_full)
+            if pop_sizes:
+                metric_stats_at_k["Mean Total Pop Size"].append(mean_total_pop_full)
+                metric_stats_at_k["Mean Correct Pop Size"].append(mean_correct_pop_full)
             metric_stats_at_k["recall@k"].append(recall_at_k(metric_df, k))
             metric_stats_at_k["precision@k"].append(precision_at_k(metric_df, k))
             metric_stats_at_k["mean_match_count@k"].append(mean_match_count_at_k(metric_df, k))
@@ -547,12 +554,13 @@ if __name__ == "__main__":
             metric_stats_at_k_excluding_known_similar["metric"].append(metric)
             metric_stats_at_k_excluding_known_similar["metric_signature"].append(signatures[0])
             metric_stats_at_k_excluding_known_similar["k"].append(k)
-            metric_stats_at_k_excluding_known_similar["Mean Total Pop Size"].append(
-                mean_total_pop_excluding_known_similar
-            )
-            metric_stats_at_k_excluding_known_similar["Mean Correct Pop Size"].append(
-                mean_correct_pop_excluding_known_similar
-            )
+            if pop_sizes:
+                metric_stats_at_k_excluding_known_similar["Mean Total Pop Size"].append(
+                    mean_total_pop_excluding_known_similar
+                )
+                metric_stats_at_k_excluding_known_similar["Mean Correct Pop Size"].append(
+                    mean_correct_pop_excluding_known_similar
+                )
             metric_stats_at_k_excluding_known_similar["recall@k"].append(
                 recall_at_k(metric_df_excluding_known_similar, k)
             )
