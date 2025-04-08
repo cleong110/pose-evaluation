@@ -1,5 +1,7 @@
+from itertools import chain
 from pathlib import Path
 
+import numpy as np
 from pose_format import Pose
 
 from pose_evaluation.metrics.distance_measure import AggregatedPowerDistance
@@ -8,6 +10,15 @@ from pose_evaluation.metrics.dtw_metric import (
     DTWAggregatedPowerDistanceMeasure,
     DTWAggregatedScipyDistanceMeasure,
     DTWDTAIImplementationDistanceMeasure,
+)
+from pose_evaluation.metrics.nonsense_measures import (
+    FrameCountDifferenceMeasure,
+    PointCountDifferenceMeasure,
+    RandomDistanceMeasure,
+    Return4Measure,
+    DifferenceOfSumsMeasure,
+    AbsMeanCoordinateValueMeasure,
+    CountSevensMeasure,
 )
 from pose_evaluation.metrics.test_distance_metric import get_poses
 from pose_evaluation.metrics.pose_processors import (
@@ -144,22 +155,59 @@ if __name__ == "__main__":
     )
     dtw_mje_dtai_fast_hands.add_preprocessor(GetHandsOnlyHolisticPoseProcessor())
 
-    dtw_mje_dtai_fast_fps15 = DistanceMetric(
-        "n-dtai-DTW-MJE_fast_fps15",
-        distance_measure=DTWDTAIImplementationDistanceMeasure(use_fast=True),
-        pose_preprocessors=get_standard_pose_processors(
-            remove_world_landmarks=False,
-            reduce_poses_to_common_components=False,
-            remove_legs=False,
-            reduce_holistic_to_face_and_upper_body=False,
-            zero_pad_shorter=False,
-        ),
+    # dtw_mje_dtai_fast_fps15 = DistanceMetric(
+    #     "n-dtai-DTW-MJE_fast_fps15",
+    #     distance_measure=DTWDTAIImplementationDistanceMeasure(use_fast=True),
+    #     pose_preprocessors=get_standard_pose_processors(
+    #         remove_world_landmarks=False,
+    #         reduce_poses_to_common_components=False,
+    #         remove_legs=False,
+    #         reduce_holistic_to_face_and_upper_body=False,
+    #         zero_pad_shorter=False,
+    #     ),
+    # )
+    # dtw_mje_dtai_fast_fps15.add_preprocessor(InterpolateAllToSetFPSPoseProcessor())
+    UniformRandomMetric = DistanceMetric(
+        name="UniformRandom", distance_measure=RandomDistanceMeasure(distribution="uniform")
     )
-    dtw_mje_dtai_fast_fps15.add_preprocessor(InterpolateAllToSetFPSPoseProcessor())
+
+    Return4Metric = DistanceMetric(name="Return4", distance_measure=Return4Measure())
+
+    PointCountDifferenceMetric = DistanceMetric(
+        name="PointCountDifference",
+        distance_measure=PointCountDifferenceMeasure(),
+        pose_preprocessors=get_standard_pose_processors(zero_pad_shorter=False),
+    )
+
+    FrameCountDifferenceMetric = DistanceMetric(
+        name="FrameCountDifference",
+        distance_measure=FrameCountDifferenceMeasure(),
+        pose_preprocessors=get_standard_pose_processors(zero_pad_shorter=False),
+    )
+
+    DifferenceOfSumsMetric = DistanceMetric(
+        name="DifferenceOfSums",
+        distance_measure=DifferenceOfSumsMeasure(),
+    )
+
+    MeanCoordinateValueMetric = DistanceMetric(
+        name="MeanCoordinate",
+        distance_measure=AbsMeanCoordinateValueMeasure(),
+    )
+
+    NonsenseMetric = DistanceMetric(name="Nonsense", distance_measure=CountSevensMeasure())
 
     # Evaluate each metric on the test poses
-    for metric in [dtw_mje_dtai_fast_fps15]:
+    for metric in [  # UniformRandomMetric,
+        # Return4Metric,
+        # PointCountDifferenceMetric,
+        # FrameCountDifferenceMetric,
+        # DifferenceOfSumsMetric,
+        MeanCoordinateValueMetric,
+        NonsenseMetric,
+    ]:
         print("*" * 10)
+        print("\nMETRIC NAME: ")
         print(metric.name)
 
         print("\nMETRIC __str__: ")
@@ -187,6 +235,16 @@ if __name__ == "__main__":
 
             print("\nSCORE with Signature (short):")
             print(metric.score_with_signature(poses[0], poses[1], short=True))
+
+            all_poses = list(chain(hypotheses, references))
+            print("\nSHAPES")
+            for pose in all_poses:
+                print(pose.body.data.shape)
+
+            print("\nALL SCORES:")
+
+            score_matrix = metric.score_all(all_poses, all_poses)
+            print(np.array(score_matrix))
 
         except NotImplementedError:
             print(f"{metric} score not implemented")
