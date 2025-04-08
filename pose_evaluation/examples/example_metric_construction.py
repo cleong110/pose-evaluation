@@ -11,6 +11,7 @@ from pose_evaluation.metrics.dtw_metric import (
     DTWAggregatedScipyDistanceMeasure,
     DTWDTAIImplementationDistanceMeasure,
 )
+from pose_evaluation.metrics.point_cloud_distances import SlicedWassersteinMeasure
 from pose_evaluation.metrics.nonsense_measures import (
     FrameCountDifferenceMeasure,
     PointCountDifferenceMeasure,
@@ -197,6 +198,8 @@ if __name__ == "__main__":
 
     NonsenseMetric = DistanceMetric(name="Nonsense", distance_measure=CountSevensMeasure())
 
+    SlicedWassersteinMetric = DistanceMetric("SlicedWasserstein", distance_measure=SlicedWassersteinMeasure())
+
     # Evaluate each metric on the test poses
     for metric in [  # UniformRandomMetric,
         # Return4Metric,
@@ -205,6 +208,7 @@ if __name__ == "__main__":
         # DifferenceOfSumsMetric,
         MeanCoordinateValueMetric,
         NonsenseMetric,
+        SlicedWassersteinMetric,
     ]:
         print("*" * 10)
         print("\nMETRIC NAME: ")

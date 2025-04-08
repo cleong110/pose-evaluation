@@ -18,6 +18,25 @@ from pose_evaluation.metrics.dtw_metric import (
     DTWDTAIImplementationDistanceMeasure,
     DTWOptimizedDistanceMeasure,
 )
+from pose_evaluation.metrics.point_cloud_distances import SlicedWassersteinMeasure
+from pose_evaluation.metrics.nonsense_measures import (
+    AbsMeanCoordinateValueMeasure,
+    AverageKeypointVarianceMeasure,
+    CountSevensMeasure,
+    DifferenceOfSumsMeasure,
+    FirstKeypointDistanceMeasure,
+    FrameCountDifferenceMeasure,
+    HashBasedMeasure,
+    LastElementMeasure,
+    ManhattanToMoonMeasure,
+    MaskedPointCountDifferenceMeasure,
+    MaskedPointProportionDifferenceMeasure,
+    PointCountDifferenceMeasure,
+    RandomDistanceMeasure,
+    Return4Measure,
+    ReturnEMeasure,
+    ReturnPiMeasure,
+)
 from pose_evaluation.metrics.pose_processors import (
     NormalizePosesProcessor,
     GetHandsOnlyHolisticPoseProcessor,
@@ -237,16 +256,24 @@ def get_metrics():
     dtw_mje_dtai_fast_hands_xy0.add_preprocessor(NormalizePosesProcessor())
     dtw_mje_dtai_fast_hands_xy0.add_preprocessor(GetHandsOnlyHolisticPoseProcessor())
 
+    sliced_wasserstein_50_slices = DistanceMetric(
+        "SlicedWasserstein50Slices", distance_measure=SlicedWassersteinMeasure()
+    )
+
+    sliced_wasserstein_7_slices = DistanceMetric(
+        "SlicedWasserstein7Slices", distance_measure=SlicedWassersteinMeasure(num_projections=7)
+    )
+
     metrics = [
-        dtw_mje_dtai_fast_hands_z_offsets,
-        dtw_mje_dtai_fast_hands_z_offsets_fps_15,
-        dtw_mje_dtai_fast,
-        dtw_mje_dtai_fast_hands,
+        # dtw_mje_dtai_fast_hands_z_offsets,
+        # dtw_mje_dtai_fast_hands_z_offsets_fps_15,
+        # dtw_mje_dtai_fast,
+        # dtw_mje_dtai_fast_hands,
         # variations on above
-        dtw_mje_dtai_fast_fps15,
-        dtw_mje_dtai_fast_fps120,
-        dtw_mje_dtai_fast_hands_fps15,
-        dtw_mje_dtai_fast_hands_fps120,
+        # dtw_mje_dtai_fast_fps15,
+        # dtw_mje_dtai_fast_fps120,
+        # dtw_mje_dtai_fast_hands_fps15,
+        # dtw_mje_dtai_fast_hands_fps120,
         # dtw_mje_dtai_slow, # literally takes hours
         # nmje,
         # nmje_120fps,
@@ -255,11 +282,43 @@ def get_metrics():
         # dtw_mje_optimized,
         # dtw_mje,
         # dtw_mje_scipy,
-        dtw_mje_dtai_fast_hands_xyt,
-        dtw_mje_dtai_fast_hands_xy0,
+        # dtw_mje_dtai_fast_hands_xyt,
+        # dtw_mje_dtai_fast_hands_xy0,
+        sliced_wasserstein_50_slices,
+        sliced_wasserstein_7_slices,
     ]
 
     return metrics
+
+
+def get_nonsense_metrics():
+
+    for measure in [
+        AbsMeanCoordinateValueMeasure(),
+        AverageKeypointVarianceMeasure(),
+        CountSevensMeasure(),
+        DifferenceOfSumsMeasure(),
+        FirstKeypointDistanceMeasure(),
+        FrameCountDifferenceMeasure(),
+        HashBasedMeasure(),
+        LastElementMeasure(),
+        ManhattanToMoonMeasure(),
+        MaskedPointCountDifferenceMeasure(),
+        MaskedPointProportionDifferenceMeasure(),
+        PointCountDifferenceMeasure(),
+        RandomDistanceMeasure(),
+        Return4Measure(),
+        ReturnEMeasure(),
+        ReturnPiMeasure(),
+    ]:
+        pose_preprocessors = []
+        if type(measure) in [ManhattanToMoonMeasure]:  # can't do unequal sequences
+            pose_preprocessors.append(ZeroPadShorterPosesProcessor())
+        nonsense_metric = DistanceMetric(
+            f"NonsenseMetric_{measure.name}", distance_measure=measure, pose_preprocessors=pose_preprocessors
+        )
+        # if "manhattan_to_moon" in nonsense_metric.name
+        yield nonsense_metric
 
 
 def load_dataset_stats(
@@ -279,6 +338,9 @@ if __name__ == "__main__":
 
     DISABLE_PROGRESS_BAR_FOR_REFERENCES = True
     data_folder = Path(r"C:\Users\Colin\data\similar_but_not_the_same")
+    output_folder = data_folder / "similar_sign_analysis_with_times" / "scores"
+    output_folder = data_folder / "nonsense_metrics" / "scores"
+    output_folder.mkdir(parents=True, exist_ok=True)
     json_name = "similar_signs_metadata.json"
     similar_sign_pairs_df = pd.read_csv(Path(r"C:\Users\Colin\data\similar_but_not_the_same\similar_sign_pairs.csv"))
 
@@ -292,7 +354,9 @@ if __name__ == "__main__":
     print(similar_sign_pairs_df.head())
     print(len(unique_glosses))
 
+    metrics = []
     metrics = get_metrics()
+    # metrics.extend(list(get_nonsense_metrics()))
 
     for index, row in tqdm(
         similar_sign_pairs_df.iterrows(),
@@ -341,12 +405,7 @@ if __name__ == "__main__":
             print(f"Shape of first hyp: {hyp_poses[0].body.data.shape}")
 
             results = defaultdict(list)
-            results_path = (
-                data_folder
-                / "similar_sign_analysis_with_times"
-                / "scores"
-                / f"{gloss_a}_{gloss_b}_{metric.name}_score_results.csv"
-            )
+            results_path = output_folder / f"{gloss_a}_{gloss_b}_{metric.name}_score_results.csv"
             if results_path.exists():
                 print(f"Results for {results_path} already exist. Skipping!")
                 continue
@@ -356,10 +415,12 @@ if __name__ == "__main__":
 
             score_values = []
             for hyp, hyp_pose_path in tqdm(
-                zip(hyp_poses, hyp_pose_paths), desc=f"{metric.name} scoring {gloss_a} vs {gloss_b}"
+                zip(hyp_poses, hyp_pose_paths),
+                desc=f"{metric.name} scoring {gloss_a} vs {gloss_b}",
+                total=len(hyp_poses),
             ):
                 for ref, ref_pose_path in tqdm(
-                    zip(ref_poses, ref_pose_paths), disable=DISABLE_PROGRESS_BAR_FOR_REFERENCES, total=len(hyp_poses)
+                    zip(ref_poses, ref_pose_paths), disable=DISABLE_PROGRESS_BAR_FOR_REFERENCES, total=len(ref_poses)
                 ):
                     start_time = time.perf_counter()
                     score = metric.score_with_signature(hyp, ref)
@@ -379,7 +440,9 @@ if __name__ == "__main__":
 
             self_score_values = []
             for hyp, hyp_pose_path in tqdm(
-                zip(hyp_poses, hyp_pose_paths), desc=f"{metric.name} scoring {gloss_a} vs {gloss_a}"
+                zip(hyp_poses, hyp_pose_paths),
+                desc=f"{metric.name} scoring {gloss_a} vs {gloss_a}",
+                total=len(hyp_poses),
             ):
                 for ref, ref_pose_path in tqdm(
                     zip(hyp_poses, hyp_pose_paths), disable=DISABLE_PROGRESS_BAR_FOR_REFERENCES, total=len(hyp_poses)
@@ -406,6 +469,7 @@ if __name__ == "__main__":
             for hyp, hyp_pose_path in tqdm(
                 zip(hyp_poses, hyp_pose_paths),
                 desc=f"{metric.name} scoring {gloss_a} vs {len(not_a_or_b_poses)} random glosses",
+                total=len(hyp_poses),
             ):
                 for ref, ref_pose_path, ref_gloss in tqdm(
                     zip(not_a_or_b_poses, not_a_or_b_pose_paths, not_a_or_b_pose_glosses),
