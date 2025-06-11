@@ -8,6 +8,13 @@ import pyarrow as pa
 import streamlit as st
 from tqdm import tqdm
 
+from pose_evaluation.evaluation.interpret_name import descriptive_name
+
+METRIC_COL = "METRIC"
+SIGNATURE_COL = "SIGNATURE"
+SHORT_COL = "SHORT"
+DESCRIPTIVE_NAME_COL = "DESCRIPTIVE_NAME"
+
 
 def evaluate_top_k_results(
     top_k_results: dict,
@@ -38,6 +45,7 @@ def evaluate_top_k_results(
     return correct / total if total > 0 else 0.0
 
 
+@st.cache_data
 def analyze_neighbors_file(
     file_path: Path,
     k: int,
@@ -92,7 +100,8 @@ else:
 dfs = []
 
 files_to_load_count = st.number_input("Files to load", value=5, max_value=len(parquets))
-max_k_val = st.number_input("Max K value", value=5, max_value=100)
+min_k_val = st.number_input("Min K value", value=1, max_value=100)
+max_k_val = st.number_input("Max K value", value=max(5, min_k_val), min_value=min_k_val, max_value=100)
 parquets = parquets[:files_to_load_count]
 
 
@@ -104,7 +113,7 @@ with st.status(f"Calculating accuracies for {len(parquets)} files...", expanded=
             state="running",
             expanded=False,
         )
-        for k in range(1, max_k_val + 1):
+        for k in range(min_k_val, max_k_val + 1):
             path = Path(file_path)
 
             if not path.exists():
@@ -139,18 +148,48 @@ with st.status(f"Calculating accuracies for {len(parquets)} files...", expanded=
 
 if knn_accuracies:
     accuracy_df = pd.DataFrame(knn_accuracies)
+    accuracy_df[DESCRIPTIVE_NAME_COL] = accuracy_df[METRIC_COL].apply(descriptive_name)
+
+    # --- Keyword filtering ---
+    exclude = st.text_input("Keywords to exclude? (comma-separated)", value="")
+    include = st.text_input("Keywords to include? (comma-separated)", value="")
+
+    metric_series = accuracy_df[METRIC_COL].str.lower()
+
+    match_all = st.checkbox("Require all keywords (AND)?", value=False)  # default is "any" (OR)
+
+    if include:
+        keywords = [kw.strip().lower() for kw in include.split(",") if kw.strip()]
+
+        # Ensure your `metric_series` is lowercase for consistent matching
+        metric_series = accuracy_df["METRIC"].str.lower()
+
+        if match_all:
+            for kw in keywords:
+                accuracy_df = accuracy_df[metric_series.str.contains(re.escape(kw), na=False)]
+        else:
+            pattern = "|".join(map(re.escape, keywords))
+            accuracy_df = accuracy_df[metric_series.str.contains(pattern, na=False)]
+
+    if exclude:
+        keywords = [kw.strip().lower() for kw in exclude.split(",") if kw.strip()]
+        pattern = "|".join(map(re.escape, keywords))
+        accuracy_df = accuracy_df[~metric_series.str.contains(pattern, na=False)]
+
     st.dataframe(accuracy_df)
 
-    df_csv_data = accuracy_df.to_csv(index=False)
+    accuracy_df_csv_data = accuracy_df.to_csv(index=False)
     st.download_button(
         label="Download KNN Accuracies CSV",
-        data=df_csv_data,
-        file_name=f"knn_metric_accuracies_{len(parquets)}metrics_k1_to_{max_k_val}.csv",
+        data=accuracy_df_csv_data,
+        file_name=f"knn_metric_accuracies_{len(parquets)}metrics_k1_to_k{max_k_val}.csv",
         mime="text/csv",
     )
 
     # Create the Plotly plot
-    fig = px.line(accuracy_df, x="k", y="accuracy", color="METRIC", title="Pose Distance Metrics KNN accuracy")
+    fig = px.line(
+        accuracy_df, x="k", y="accuracy", color=DESCRIPTIVE_NAME_COL, title="Pose Distance Metrics KNN accuracy"
+    )
 
     # Display the plot as JSON
     st.plotly_chart(fig, use_container_width=True)
