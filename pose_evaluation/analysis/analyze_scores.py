@@ -36,7 +36,12 @@ def extract_metric_name_from_filename(stem: str) -> str | None:
         return None
     possible_gloss, rest = stem.split("_", 1)
     first_part = rest.split("_", 1)[0]
-    assert "Return4" in first_part or "trimmed" in first_part, (
+    # What should follow the gloss:
+    # ("CheatingMetric" or "Return4Metric"), or ("untrimmed"/"startendtrimmed")
+    # If instead we get a gloss like "OH_I_SEE" it'll crash,
+    # but if we convert the whole thing to pyarrow partitioned by metric
+    # then the problem goes away.
+    assert "Metric" in first_part or "trimmed" in first_part, (
         f"Unexpected format: {rest}, possibly gloss has underscores? {possible_gloss}"
     )
     metric, _ = rest.split("_outgloss_", 1)
