@@ -8,8 +8,21 @@ import matplotlib.pyplot as plt
 # Optional: for visual overlap
 import pandas as pd
 import streamlit as st
+from fuzzywuzzy import fuzz
 from num2words import num2words
 from supervenn import supervenn
+
+
+def find_fuzzy_matches(input_gloss, target_glosses, threshold=60):
+    fuzzy_matches = []
+    for target_gloss in target_glosses:
+        similarity = fuzz.ratio(input_gloss, target_gloss)
+        if similarity >= threshold:
+            fuzzy_matches.append((target_gloss, similarity))
+
+    # sort by similarity score
+    fuzzy_matches = sorted(fuzzy_matches, key=lambda x: x[1], reverse=True)
+    return fuzzy_matches
 
 
 def convert_digits_to_words(s: str) -> str:
@@ -32,6 +45,35 @@ def create_gloss_tuple(row, col1: str, col2: str):
     gloss_1 = row[col1].upper()
     gloss_2 = row[col2].upper()
     return tuple(sorted([gloss_1, gloss_2]))
+
+
+def expand_gloss_pairs(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Convert a wide gloss pair DataFrame into a long format with a single 'GLOSS' column.
+
+    Parameters
+    ----------
+        df (pd.DataFrame): A DataFrame with columns ['GLOSS_A', 'GLOSS_B', 'relation'].
+
+    Returns
+    -------
+        pd.DataFrame: A long-form DataFrame with columns ['pair_id', 'GLOSS', 'relation'].
+
+    """
+    if not {"GLOSS_A", "GLOSS_B", "relation"}.issubset(df.columns):
+        raise ValueError("Input DataFrame must contain 'GLOSS_A', 'GLOSS_B', and 'relation' columns")
+
+    # Add a unique pair identifier
+    df = df.copy()
+    df["pair_id"] = df.index
+
+    # Unpivot gloss columns into a single column
+    df_long = pd.melt(df, id_vars=["relation", "pair_id"], value_vars=["GLOSS_A", "GLOSS_B"], value_name="GLOSS").drop(
+        columns="variable"
+    )
+
+    # Optional: sort and reset index
+    return df_long.sort_values(by="pair_id").reset_index(drop=True)
 
 
 def load_csv(path: Path, **kwargs):
@@ -144,6 +186,13 @@ def select_merge_columns(
 
     filtered_df = df.dropna(subset=keep_cols) if drop_na else df.copy()
 
+    if st.checkbox(
+        f"Strip leading/trailing whitespace from {df_name} {merge_on}",
+        key=f"{key_prefix}_stripspaces_{side}",
+        value=True,
+    ):
+        filtered_df[merge_on] = filtered_df[merge_on].str.strip()
+
     apply_upper = st.checkbox(
         f"Apply uppercasing to {merge_on}",
         key=f"{key_prefix}_applyupper_{side}",
@@ -152,12 +201,17 @@ def select_merge_columns(
     if apply_upper:
         filtered_df[merge_on] = filtered_df[merge_on].str.upper()
 
-    apply_num2words = st.checkbox(
+    if st.checkbox(
         f"Apply num2words to {merge_on}",
         key=f"{key_prefix}_apply_num2words_{side}",
-    )
-    if apply_num2words:
+    ):
         filtered_df[merge_on] = filtered_df[merge_on].astype(str).apply(convert_digits_to_words)
+
+    if st.checkbox(
+        f"Remove underscores in {merge_on}",
+        key=f"{key_prefix}_remove_underscores_{side}",
+    ):
+        filtered_df[merge_on] = filtered_df[merge_on].str.replace("_", "")
 
     if st.checkbox(
         f"Show preview of filtered {df_name} ({len(df) - len(filtered_df)} rows dropped)",
@@ -210,6 +264,14 @@ def interactive_merge(
     st.write(f"{len(left_only)} Unmatched in {left_df_name}:")
     st.dataframe(left_only)
 
+    if st.checkbox("Find Fuzzy Matches?", key=f"{left_df_name}_and_{right_df_name}_findfuzzy_left"):
+        threshold = st.slider("Fuzzy threshold", min_value=1, max_value=100, value=85)
+        for val in left_only[left_on].unique().tolist():
+            fuzzy_matches = find_fuzzy_matches(val, right_only[right_on].unique().tolist(), threshold=threshold)
+            if fuzzy_matches:
+                st.write(f"Close matches for {val}:")
+                st.write([match[0] for match in fuzzy_matches])
+
     st.write(f"{len(right_only)} Unmatched in {right_df_name}")
     st.dataframe(right_only)
 
@@ -226,6 +288,55 @@ def interactive_merge(
     st.dataframe(merged_sample)
 
     return merged_df
+
+
+def asl_knowledge_graph_cleanup(aslkg_df: pd.DataFrame):
+    aslkg_df = aslkg_df.copy()
+    aslkg_df = aslkg_df[aslkg_df["relation"] == "response"]
+
+    subject_object_columns = ["subject", "object"]
+
+    # Keep only rows where both subject and object contain "asllex:"
+    mask = aslkg_df[subject_object_columns].apply(lambda col: col.str.contains("asllex:"), axis=0).all(axis=1)
+    aslkg_df = aslkg_df[mask]
+
+    # Save original values
+    for col in subject_object_columns:
+        aslkg_df[f"{col} Original"] = aslkg_df[col]
+
+    # Clean up subject and object values
+    for col in subject_object_columns:
+        aslkg_df[col] = (
+            aslkg_df[col]
+            .str.replace("asllex:", "", regex=False)
+            .str.replace("#", "", regex=False)
+            .str.replace("think_chin.m4v", "think_chin")
+            .str.replace("release,_rescue", "release, rescue")  # E_03_059
+            .str.replace(
+                r"close_$", "close_eyes", regex=True
+            )  # A guess, because asllex:close_	response	asllex:night and the other option was close_door
+            .str.replace(
+                r"fry_$",
+                "fry",  # H_01_069 is the only close choice
+                regex=True,
+            )
+            .str.replace(
+                r"murder_$",
+                "murder",  # F_02_077 is the only close choice
+                regex=True,
+            )
+        )
+
+    # Create gloss tuple
+    aslkg_df["gloss_tuple"] = aslkg_df.apply(create_gloss_tuple, col1="subject", col2="object", axis=1)
+
+    # Replace relation and rename for output
+    aslkg_df["relation"] = "Semantic"
+    aslkg_df = aslkg_df.rename(columns={"subject": "GLOSS_A", "object": "GLOSS_B"})
+
+    aslkg_df = aslkg_df.drop_duplicates(subset=["GLOSS_A", "relation", "GLOSS_B"])
+
+    return aslkg_df
 
 
 # Streamlit App
@@ -246,15 +357,7 @@ show_supervenn = st.sidebar.checkbox("Show Supervenn Overlap", value=False)
 
 # ASL Knowledge Graph
 aslkg_df = load_csv(aslkg_csv, delimiter="\t")
-aslkg_df = aslkg_df[aslkg_df["relation"] == "response"]
-aslkg_df = aslkg_df[aslkg_df["subject"].str.contains("asllex:") & aslkg_df["object"].str.contains("asllex:")]
-aslkg_df["subject Original"] = aslkg_df["subject"]
-aslkg_df["subject"] = aslkg_df["subject"].str.replace("asllex:", "").str.replace("#", "")
-aslkg_df["object Original"] = aslkg_df["subject"]
-aslkg_df["object"] = aslkg_df["object"].str.replace("asllex:", "").str.replace("#", "")
-aslkg_df["gloss_tuple"] = aslkg_df.apply(create_gloss_tuple, col1="subject", col2="object", axis=1)
-aslkg_df["relation"] = "Semantic"
-aslkg_df = aslkg_df.rename(columns={"subject": "GLOSS_A", "object": "GLOSS_B"})
+aslkg_df = asl_knowledge_graph_cleanup(aslkg_df)
 
 sem_lex_df = load_csv(sem_lex_csv)
 sem_lex_df = sem_lex_df[sem_lex_df["label_type"] == "asllex"]
@@ -311,6 +414,11 @@ csv_output = st.download_button(
 )
 
 
+final_relations_df_long = expand_gloss_pairs(final_relations_df)
+st.dataframe(final_relations_df_long)
+relations_merged = interactive_merge(final_relations_df_long, "ASLKG and Lookalikes", asl_lex_df, "ASL Lex 2.0")
+
+
 if show_supervenn:
     st.subheader("Supervenn Diagram")
 
@@ -319,6 +427,9 @@ if show_supervenn:
             "ASL Citizen (merged with ASL Lex 2.0)": asl_citizen_merged_df,
             "Sem-Lex (merged with ASL LEX 2.0)": semlex_merged_df,
             "ASL-Lex 2.0": asl_lex_df,
+            "Visual/Semantic Relations": relations_merged,
+            "Semantic Relations": relations_merged[relations_merged["relation"] == "Semantic"],
+            "Visual Relations": relations_merged[relations_merged["relation"] == "Lookalike"],
         }
     )
 
@@ -330,6 +441,7 @@ if show_supervenn:
         sets.append(df_set)
         # st.write(len(df_set))
     fig, ax = plt.subplots(figsize=(12, 6))
+    # plt.title(f"Overlap of {labels}", fontsize=16, fontweight="bold")
 
     supervenn(sets, labels, ax=ax)
     st.write("Plotting Supervenn...")
