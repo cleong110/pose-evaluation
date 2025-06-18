@@ -196,7 +196,7 @@ def plot_pareto_frontier(df: pd.DataFrame):
         num_selected = len(components_list)
 
         # Show frequencies
-        st.markdown(f"### Component frequencies for {column_to_split} in selection:")
+        st.markdown(f"### Metric keyword frequencies for {column_to_split} in selection:")
         for component, count in component_counts.most_common():
             st.write(f"- **{component}**: {count} / {num_selected}")
     else:
@@ -596,7 +596,7 @@ if df_list:
     sort_ascending = st.checkbox("Sort ascending?", value=False)
 
     # --- Keyword filtering ---
-    exclude = st.text_input("Keywords to exclude? (comma-separated)", value="Return4Metric,Cheating,EmbeddingMetric")
+    exclude = st.text_input("Keywords to exclude? (comma-separated)", value="Return4Metric,Cheating")
     include = st.text_input("Keywords to include? (comma-separated)", value="")
 
     metric_series = df[METRIC_COL].str.lower()
