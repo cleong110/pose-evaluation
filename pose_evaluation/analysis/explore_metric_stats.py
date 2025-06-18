@@ -40,8 +40,16 @@ def plot_pareto_frontier(df: pd.DataFrame):
         st.warning("Need at least two numeric columns to compute Pareto frontier.")
         return
 
-    col1 = st.selectbox("Select X-axis column", numeric_cols, index=0)
-    col2 = st.selectbox("Select Y-axis column", numeric_cols, index=1)
+    col1 = st.selectbox(
+        "Select X-axis column",
+        numeric_cols,
+        index=numeric_cols.index("mean_score_time") if "mean_score_time" in numeric_cols else 0,
+    )
+    col2 = st.selectbox(
+        "Select Y-axis column",
+        numeric_cols,
+        index=numeric_cols.index("mean_average_precision") if "mean_average_precision" in numeric_cols else 1,
+    )
     normalize = st.checkbox("Normalize columns to [0, 1]?", value=False)
 
     if SHORT_COL not in df.columns:
@@ -63,8 +71,8 @@ def plot_pareto_frontier(df: pd.DataFrame):
             plot_df[col] = (plot_df[col] - plot_df[col].min()) / (plot_df[col].max() - plot_df[col].min())
 
     # Compute Pareto frontier
-    maximize_col1 = st.checkbox(f"Maximize {col1}?", value=True)
-    maximize_col2 = st.checkbox(f"Maximize {col2}?", value=False)
+    maximize_col1 = st.checkbox(f"Maximize {col1}?", value=False)
+    maximize_col2 = st.checkbox(f"Maximize {col2}?", value=True)
 
     frontier = get_pareto_frontier(plot_df, col1, col2, maximize_col1, maximize_col2)
     if st.checkbox("Show Pareto Frontier Table?"):
@@ -577,12 +585,18 @@ if df_list:
 
     # --- Column selection ---
     numeric_cols = df.select_dtypes(include="number").columns.tolist()
-    sort_col = st.selectbox("Sort by column", numeric_cols)
+    default_sort_col = "mean_average_precision"
+
+    sort_col = st.selectbox(
+        "Sort by column",
+        numeric_cols,
+        index=numeric_cols.index(default_sort_col) if default_sort_col in numeric_cols else 0,
+    )
     sort_col_capitalized = " ".join(s.capitalize() for s in sort_col.split("_"))
     sort_ascending = st.checkbox("Sort ascending?", value=False)
 
     # --- Keyword filtering ---
-    exclude = st.text_input("Keywords to exclude? (comma-separated)", value="")
+    exclude = st.text_input("Keywords to exclude? (comma-separated)", value="Return4Metric,Cheating,EmbeddingMetric")
     include = st.text_input("Keywords to include? (comma-separated)", value="")
 
     metric_series = df[METRIC_COL].str.lower()
@@ -608,7 +622,9 @@ if df_list:
         df = df[~metric_series.str.contains(pattern, na=False)]
 
     # --- Multi-keyword matching ---
-    keyword_input = st.text_input("Search / highlight by keyword(s) (comma-separated)", value="")
+    keyword_input = st.text_input(
+        "Search / highlight by keyword(s) (comma-separated)", value="DTW,PowerDistance,embedding"
+    )
 
     multi_color = st.checkbox("Color bars by individual keyword?", value=True)
 
