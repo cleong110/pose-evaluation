@@ -1,5 +1,6 @@
 import os
 import re
+from collections import Counter
 from itertools import combinations
 from pathlib import Path
 
@@ -66,6 +67,14 @@ def plot_pareto_frontier(df: pd.DataFrame):
     maximize_col2 = st.checkbox(f"Maximize {col2}?", value=False)
 
     frontier = get_pareto_frontier(plot_df, col1, col2, maximize_col1, maximize_col2)
+    if st.checkbox("Show Pareto Frontier Table?"):
+        st.dataframe(frontier)
+        st.download_button(
+            label="Download Pareto Frontier CSV",
+            data=frontier.to_csv(index=False),
+            file_name=f"pareto_frontier_{len(df)}metrics_{col1}_vs_{col2}.csv",
+            mime="text/csv",
+        )
 
     fig = go.Figure()
 
@@ -90,7 +99,6 @@ def plot_pareto_frontier(df: pd.DataFrame):
                         else group[[SHORT_COL]]
                     ),
                     hovertemplate=f"{DESCRIPTIVE_NAME_COL}: %{{customdata[0]}}<br>"
-                    #   f"{'METRIC: %{{customdata[1]}}<br>' if METRIC_COL in group else ''}"
                     f"{METRIC_COL}: %{{customdata[1]}}<br>"
                     f"{col1}: %{{x:.3f}}<br>{col2}: %{{y:.3f}}<extra></extra>",
                 )
@@ -108,7 +116,7 @@ def plot_pareto_frontier(df: pd.DataFrame):
             )
         )
 
-    # Plot Pareto frontier
+    # Plot Pareto frontier (excluded from selection mapping)
     fig.add_trace(
         go.Scatter(
             x=frontier[col1],
@@ -121,7 +129,6 @@ def plot_pareto_frontier(df: pd.DataFrame):
                 "color": "rgba(0,0,0,0)",  # Transparent fill
                 "line": {
                     "width": 1,
-                    # color='blue'  # Border color
                 },
             },
             customdata=(
@@ -141,7 +148,51 @@ def plot_pareto_frontier(df: pd.DataFrame):
         legend_title="Highlight Group" if "highlight" in plot_df.columns else "Legend",
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    event = st.plotly_chart(fig, use_container_width=True, key="pareto_plot", on_select="rerun")
+
+    # Show selected points if any
+    if event and event.selection and event.selection.points:
+        selected_indices = []
+
+        if "highlight" in plot_df.columns:
+            grouped = list(plot_df.groupby("highlight"))
+        else:
+            grouped = [("All", plot_df)]
+
+        trace_to_df_index = [group.index.tolist() for _, group in grouped]
+        num_data_traces = len(trace_to_df_index)  # exclude Pareto
+
+        for pt in event.selection.points:
+            curve_num = pt["curve_number"]
+            point_idx = pt["point_index"]
+            if curve_num < num_data_traces:
+                df_index = trace_to_df_index[curve_num][point_idx]
+                selected_indices.append(df_index)
+
+        selected = plot_df.loc[selected_indices]
+
+        st.markdown(f"### Selected {len(selected)} points:")
+        st.dataframe(selected)
+
+        # Analyze what components are common across DESCRIPTIVE_NAME
+        split_on = st.text_input("Split on?", value="+")
+        column_to_split = col1 = st.selectbox(
+            "Select Column", selected.columns, index=list(selected.columns).index(DESCRIPTIVE_NAME_COL)
+        )
+        components_list = (
+            selected[column_to_split].dropna().astype(str).apply(lambda s: [x.strip() for x in s.split(split_on)])
+        )
+        all_components = [comp for sublist in components_list for comp in sublist]
+
+        component_counts = Counter(all_components)
+        num_selected = len(components_list)
+
+        # Show frequencies
+        st.markdown(f"### Component frequencies for {column_to_split} in selection:")
+        for component, count in component_counts.most_common():
+            st.write(f"- **{component}**: {count} / {num_selected}")
+    else:
+        st.write("No points selected")
 
 
 def get_pareto_frontier(
@@ -432,6 +483,7 @@ csv_paths_default = [
     # /opt/home/cleong/projects/pose-evaluation/metric_results_round_4_pruned_to_match_embeddings/5_19_score_analysis_48_and_2_and_6embedding_metrics_169_glosses
     "/opt/home/cleong/projects/pose-evaluation/metric_results_round_4_pruned_to_match_embeddings/5_19_score_analysis_48_and_2_and_6embedding_metrics_169_glosses/stats_by_metric.csv",
     "/opt/home/cleong/projects/pose-evaluation/metric_results_round_4_pruned_to_match_embeddings/5_21_score_analysis_1206metrics_169glosses/stats_by_metric.csv",
+    "metric_results_round_4_pruned_to_match_embeddings/2025-06-16_3368_metrics_169_glosses_comparable_score_analysis/stats_by_metric.csv",
 ]
 csv_paths_input = st.text_input(
     "Enter paths to your CSV files (comma-separated)",
@@ -836,86 +888,99 @@ if csv_paths_input:
     else:
         effect_keywords = [kw.strip() for kw in effect_keyword.split(",")]
         # effect_keywords = [effect_keyword]
+    if st.checkbox("Estimate Average Keyword Effects?"):
+        summary_data = []
+        for effect_keyword in effect_keywords:
+            kw = effect_keyword.strip().lower()
+            df["_metric_lower"] = df[METRIC_COL].str.lower()
 
-    summary_data = []
-    for effect_keyword in effect_keywords:
-        kw = effect_keyword.strip().lower()
-        df["_metric_lower"] = df[METRIC_COL].str.lower()
+            has_kw = df[df["_metric_lower"].str.contains(kw)]
+            no_kw = df[~df["_metric_lower"].str.contains(kw)]
 
-        has_kw = df[df["_metric_lower"].str.contains(kw)]
-        no_kw = df[~df["_metric_lower"].str.contains(kw)]
+            if len(has_kw) == 0:
+                st.warning(f"No metrics contain keyword '{kw}'")
+            elif len(no_kw) == 0:
+                st.warning(f"All metrics contain keyword '{kw}'")
+            else:
+                avg_with = has_kw[sort_col].mean()
+                max_with = has_kw[sort_col].max()
+                min_with = has_kw[sort_col].min()
+                avg_rank = has_kw["RANK"].mean()
+                avg_without = no_kw[sort_col].mean()
+                max_without = no_kw[sort_col].max()
+                min_without = no_kw[sort_col].min()
+                delta = avg_with - avg_without
 
-        if len(has_kw) == 0:
-            st.warning(f"No metrics contain keyword '{kw}'")
-        elif len(no_kw) == 0:
-            st.warning(f"All metrics contain keyword '{kw}'")
-        else:
-            avg_with = has_kw[sort_col].mean()
-            max_with = has_kw[sort_col].max()
-            min_with = has_kw[sort_col].min()
-            avg_rank = has_kw["RANK"].mean()
-            avg_without = no_kw[sort_col].mean()
-            max_without = no_kw[sort_col].max()
-            min_without = no_kw[sort_col].min()
-            delta = avg_with - avg_without
+                summary_data.append(
+                    {
+                        "keyword": kw,
+                        f"Δ {sort_col}": round(delta, 4),
+                        f"count within {top_or_bottom} 100": (has_kw["RANK"] <= 100).sum(),
+                        f"count within {top_or_bottom} 10": (has_kw["RANK"] <= 10).sum(),
+                        f"count within {top_or_bottom} 5": (has_kw["RANK"] <= 5).sum(),
+                        "mean (with kw)": round(avg_with, 4),
+                        "mean (without kw)": round(avg_without, 4),
+                        "n (with)": len(has_kw),
+                        "n (without)": len(no_kw),
+                        "mean metric rank": avg_rank,
+                    }
+                )
 
-            summary_data.append(
-                {
-                    "keyword": kw,
-                    f"Δ {sort_col}": round(delta, 4),
-                    f"count within {top_or_bottom} 100": (has_kw["RANK"] <= 100).sum(),
-                    f"count within {top_or_bottom} 10": (has_kw["RANK"] <= 10).sum(),
-                    f"count within {top_or_bottom} 5": (has_kw["RANK"] <= 5).sum(),
-                    "mean (with kw)": round(avg_with, 4),
-                    "mean (without kw)": round(avg_without, 4),
-                    "n (with)": len(has_kw),
-                    "n (without)": len(no_kw),
-                    "mean metric rank": avg_rank,
-                }
+                st.write(f"#### Effect of `{kw}`")
+                st.write(f"Compared `{len(has_kw)}` metrics **with** '`{kw}`' vs `{len(no_kw)}` **without**.")
+                st.write(f"**Average on '{sort_col}' with '{kw}':** `{avg_with:.4f}`")
+                st.write(f"**Average on '{sort_col}' without '{kw}':** `{avg_without:.4f}`")
+                st.write(f"**Estimated effect on '{sort_col}' of '{kw}':** `{delta:+.4f}`")
+                st.write(f"{kw} count within {top_or_bottom} 100 by {sort_col}: {(has_kw['RANK'] <= 100).sum()}")
+                st.write(f"{kw} count within {top_or_bottom} 10 by {sort_col}: {(has_kw['RANK'] <= 10).sum()}")
+                st.write(f"{kw} count within {top_or_bottom} 5 by {sort_col}: {(has_kw['RANK'] <= 5).sum()}")
+
+                if st.checkbox(f"Show distributions for {kw}?"):
+                    fig = go.Figure()
+
+                    fig.add_trace(
+                        go.Histogram(
+                            x=has_kw[sort_col],
+                            name=f"Has '{kw}'",
+                            marker_color="blue",
+                            opacity=0.6,
+                            histnorm="probability density",
+                        )
+                    )
+
+                    fig.add_trace(
+                        go.Histogram(
+                            x=no_kw[sort_col],
+                            name=f"No '{kw}'",
+                            marker_color="orange",
+                            opacity=0.6,
+                            histnorm="probability density",
+                        )
+                    )
+
+                    fig.update_layout(
+                        barmode="overlay",
+                        title=f"Distribution of '{sort_col}' by presence of '{kw}'",
+                        xaxis_title=sort_col,
+                        yaxis_title="Density",
+                        legend={"x": 0.7, "y": 0.95},
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True)
+        if summary_data:
+            summary_df = pd.DataFrame(summary_data)
+            summary_df = summary_df.sort_values(by=f"Δ {sort_col}", ascending=sort_ascending)
+            st.markdown("### 📋 Summary of Keyword Effects")
+            st.dataframe(summary_df, use_container_width=True)
+            csv_data = summary_df.to_csv(index=False)
+
+            st.download_button(
+                label="Download CSV",
+                data=csv_data,
+                file_name=f"summary_of_keyword_effects_on_{sort_col}.csv",
+                mime="text/csv",
             )
-
-            st.write(f"#### Effect of `{kw}`")
-            st.write(f"Compared `{len(has_kw)}` metrics **with** '`{kw}`' vs `{len(no_kw)}` **without**.")
-            st.write(f"**Average on '{sort_col}' with '{kw}':** `{avg_with:.4f}`")
-            st.write(f"**Average on '{sort_col}' without '{kw}':** `{avg_without:.4f}`")
-            st.write(f"**Estimated effect on '{sort_col}' of '{kw}':** `{delta:+.4f}`")
-            st.write(f"{kw} count within {top_or_bottom} 100 by {sort_col}: {(has_kw['RANK'] <= 100).sum()}")
-            st.write(f"{kw} count within {top_or_bottom} 10 by {sort_col}: {(has_kw['RANK'] <= 10).sum()}")
-            st.write(f"{kw} count within {top_or_bottom} 5 by {sort_col}: {(has_kw['RANK'] <= 5).sum()}")
-
-            if st.checkbox(f"Show distributions for {kw}?"):
-                fig = go.Figure()
-
-                fig.add_trace(
-                    go.Histogram(
-                        x=has_kw[sort_col],
-                        name=f"Has '{kw}'",
-                        marker_color="blue",
-                        opacity=0.6,
-                        histnorm="probability density",
-                    )
-                )
-
-                fig.add_trace(
-                    go.Histogram(
-                        x=no_kw[sort_col],
-                        name=f"No '{kw}'",
-                        marker_color="orange",
-                        opacity=0.6,
-                        histnorm="probability density",
-                    )
-                )
-
-                fig.update_layout(
-                    barmode="overlay",
-                    title=f"Distribution of '{sort_col}' by presence of '{kw}'",
-                    xaxis_title=sort_col,
-                    yaxis_title="Density",
-                    legend={"x": 0.7, "y": 0.95},
-                )
-
-                st.plotly_chart(fig, use_container_width=True)
-    if st.checkbox(f"Pairwise comparisons for {effect_keywords}"):
+    if st.checkbox("Find Pairwise Keyword Comparisons?"):
         pairwise_effect_rows = []
         for effect_keywords_pairwise in effect_keywords:
             effect_keywords_pairwise = [k.strip() for k in effect_keywords_pairwise.split(",")]
@@ -1006,20 +1071,6 @@ if csv_paths_input:
             #     "}\n"
             # )
             st.code(latex_str)
-
-    if summary_data:
-        summary_df = pd.DataFrame(summary_data)
-        summary_df = summary_df.sort_values(by=f"Δ {sort_col}", ascending=sort_ascending)
-        st.markdown("### 📋 Summary of Keyword Effects")
-        st.dataframe(summary_df, use_container_width=True)
-        csv_data = summary_df.to_csv(index=False)
-
-        st.download_button(
-            label="Download CSV",
-            data=csv_data,
-            file_name=f"summary_of_keyword_effects_on_{sort_col}.csv",
-            mime="text/csv",
-        )
 
     # Plot two things against each other
     chart_type = st.selectbox("Choose chart type", ["Pareto Frontier", "Grouped Bar Chart"])
