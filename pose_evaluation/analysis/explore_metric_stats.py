@@ -485,8 +485,8 @@ csv_paths_default = [
     # "/opt/home/cleong/projects/pose-evaluation/metric_results_round_4_pruned_to_match_embeddings/5_21_score_analysis_1206metrics_169glosses/stats_by_metric.csv",
     str(
         Path(__file__).parent.resolve().parent.parent
-        / "metric_results_round_4_pruned_to_match_embeddings/2025-06-16_3368_metrics_169_glosses_comparable_score_analysis/stats_by_metric.csv",
-    )
+        / "metric_results_round_4_pruned_to_match_embeddings/2025-06-16_3368_metrics_169_glosses_comparable_score_analysis/stats_by_metric.csv"
+    ),
 ]
 csv_paths_input = st.text_input(
     "Enter paths to your CSV files (comma-separated)",
