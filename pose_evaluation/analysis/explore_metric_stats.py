@@ -477,12 +477,12 @@ csv_paths_default = [
     # "/opt/home/cleong/projects/pose-evaluation/metric_results_round_2/score_analysis/stats_by_metric.csv",
     # "/opt/home/cleong/projects/pose-evaluation/metric_results_round_4/score_analysis/stats_by_metric.csv",
     # "/opt/home/cleong/projects/pose-evaluation/metric_results_round_4/5_14_169_glosses_40680_metrics_score_analysis/stats_by_metric.csv",
-    "/opt/home/cleong/projects/pose-evaluation/metric_results_round_4/5_12_2025_score_analysis_288_metrics_169_glosses/stats_by_metric.csv",
+    # "/opt/home/cleong/projects/pose-evaluation/metric_results_round_4/5_12_2025_score_analysis_288_metrics_169_glosses/stats_by_metric.csv",
     # "/opt/home/cleong/projects/pose-evaluation/metric_results_embeddings/5_12_2025_embedding_score_analysis_169_glosses/stats_by_metric.csv",
     # "/opt/home/cleong/projects/pose-evaluation/metric_results_round_4_pruned_to_match_embeddings/5_19_score_analysis_48_metrics_and_6_embedding_metrics_comparable/stats_by_metric.csv",
     # /opt/home/cleong/projects/pose-evaluation/metric_results_round_4_pruned_to_match_embeddings/5_19_score_analysis_48_and_2_and_6embedding_metrics_169_glosses
-    "/opt/home/cleong/projects/pose-evaluation/metric_results_round_4_pruned_to_match_embeddings/5_19_score_analysis_48_and_2_and_6embedding_metrics_169_glosses/stats_by_metric.csv",
-    "/opt/home/cleong/projects/pose-evaluation/metric_results_round_4_pruned_to_match_embeddings/5_21_score_analysis_1206metrics_169glosses/stats_by_metric.csv",
+    # "/opt/home/cleong/projects/pose-evaluation/metric_results_round_4_pruned_to_match_embeddings/5_19_score_analysis_48_and_2_and_6embedding_metrics_169_glosses/stats_by_metric.csv",
+    # "/opt/home/cleong/projects/pose-evaluation/metric_results_round_4_pruned_to_match_embeddings/5_21_score_analysis_1206metrics_169glosses/stats_by_metric.csv",
     "metric_results_round_4_pruned_to_match_embeddings/2025-06-16_3368_metrics_169_glosses_comparable_score_analysis/stats_by_metric.csv",
 ]
 csv_paths_input = st.text_input(
@@ -493,20 +493,33 @@ csv_paths_input = st.text_input(
 csv_path_options = [p.strip() for p in csv_paths_input.split(",")]
 csv_paths = st.multiselect("Which of these CSVs to load?", options=csv_path_options, default=csv_path_options)
 
-if csv_paths_input:
-    try:
-        # Split input by comma and strip whitespace
+# --- File uploader input ---
+uploaded_files = st.file_uploader("Or upload CSV files directly", type="csv", accept_multiple_files=True)
 
-        # Load and concatenate all CSVs
-        df_list = []
-        for path in csv_paths:
-            df = pd.read_csv(path)
-            df_list.append(df)
-            st.write(f"Loaded {len(df)} from {path}")
-        df = pd.concat(df_list, ignore_index=True)
+# --- Load all selected and uploaded CSVs ---
+df_list = []
+
+# Load from file paths
+for path in csv_paths:
+    try:
+        df = pd.read_csv(path)
+        df_list.append(df)
+        st.write(f"Loaded {len(df)} rows from path: `{path}`")
     except Exception as e:
-        st.error(f"Error loading files: {e}")
-        st.stop()
+        st.error(f"Error loading `{path}`: {e}")
+
+# Load from uploaded files
+for uploaded_file in uploaded_files:
+    try:
+        df = pd.read_csv(uploaded_file)
+        df_list.append(df)
+        st.write(f"Loaded {len(df)} rows from uploaded file: `{uploaded_file.name}`")
+    except Exception as e:
+        st.error(f"Error reading uploaded file `{uploaded_file.name}`: {e}")
+
+if df_list:
+    df = pd.concat(df_list, ignore_index=True)
+    st.write(f"Combined DataFrame has {len(df)} rows")
 
     # Find duplicates in the METRIC_COL column
     df[SHORT_COL] = df[METRIC_COL].apply(shorten_metric_name)
@@ -541,7 +554,7 @@ if csv_paths_input:
     # Drop duplicates by keeping the one with the highest total_count
     df_deduped = df.loc[df.groupby(SHORT_COL)["total_count"].idxmax()]
 
-    st.write(f"Deduplicated metrics (kept the one with highest total_count): we now have {len(df_deduped)}")
+    st.success(f"Combined Deduplicated Dataframe has {len(df_deduped)} rows")
     # st.write(df_deduped)
     df = df_deduped
 
