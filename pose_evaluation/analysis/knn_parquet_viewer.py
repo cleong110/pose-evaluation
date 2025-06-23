@@ -265,7 +265,7 @@ else:
 
 dfs = []
 
-files_to_load_count = st.number_input("Files to load", value=5, max_value=len(parquets))
+files_to_load_count = st.number_input("Files to load", value=min(5, len(parquets)), max_value=len(parquets))
 min_k_val = st.number_input("Min K value", value=1, max_value=100)
 max_k_val = st.number_input("Max K value", value=max(5, min_k_val), min_value=min_k_val, max_value=100)
 parquets = parquets[:files_to_load_count]
@@ -322,7 +322,7 @@ if len(accuracy_df) > 0:
 
     plot_title = st.text_input(
         label="Plot Title",
-        value="Pose Distance Metrics KNN Accuracy, ASL Citizen testXtrain, 1100 test poses, 40154 train poses",
+        value="Pose Distance Metrics KNN Accuracy, ASL Citizen testXtrain",
     )
 
     # Create the Plotly plot
@@ -339,7 +339,7 @@ if len(accuracy_df) > 0:
     fig = plot_accuracy_by_k_grouped_color(
         df=accuracy_df,
         trace_col="DESCRIPTIVE_NAME",
-        hover_cols=["DESCRIPTIVE_NAME", "METRIC"],
+        hover_cols=["DESCRIPTIVE_NAME", "METRIC", "k", "accuracy"],
         color_col="highlight",
         plot_title=plot_title,
     )
