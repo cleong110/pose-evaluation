@@ -47,6 +47,23 @@ _SIGNATURE_RE = re.compile(r"default_distance:([\d.]+)")
 _DEFAULTDIST_RE = re.compile(r"defaultdist([\d.]+)")
 
 
+DEFAULT_METRIC_PARAMETERS = {
+    "z_speeds": [None, 0.1, 1.0, 4.0, 100.0, 1000.0],
+    "default_distances": [0.0, 1.0, 10.0, 100.0, 1000.0],
+    "masked_fill_values": [0.0, 1.0, 10.0, 100.0, 1000.0],
+    "trim_values": [True, False],
+    "normalize_values": [True, False],
+    "sequence_alignment_strategies": ["zeropad", "padwithfirstframe", "dtw"],
+    "keypoint_selection_strategies": [
+        "removelegsandworld",
+        "reduceholistic",
+        "hands",
+        "youtubeaslkeypoints",
+    ],
+    "fps_values": [None, 15, 30, 45, 60, 120],
+}
+
+
 def extract_signature_distance(signature: str) -> str | None:
     """
     From a signature string, extract the float following
@@ -201,48 +218,17 @@ def get_metrics(
     measure_names = [measure.name for measure in measures]
     assert len(set(measure_names)) == len(measure_names)
 
-    z_speeds = [None, 0.1, 1.0, 4.0, 100.0, 1000.0]
-
-    default_distances = [
-        0.0,
-        1.0,
-        10.0,
-        100.0,
-        1000.0,
-    ]
-
-    masked_fill_values = [
-        # None, # leads to nan values
-        0.0,  # top 8/10 metrics
-        1.0,  #
-        10.0,
-        100.0,
-        1000.0,
-    ]  # technically could also do None, but that leads to nan values slipping through
-
+    z_speeds = list(DEFAULT_METRIC_PARAMETERS["z_speeds"])
+    default_distances = list(DEFAULT_METRIC_PARAMETERS["default_distances"])
+    masked_fill_values = list(DEFAULT_METRIC_PARAMETERS["masked_fill_values"])
     if include_masked:
         masked_fill_values.append(None)
 
-    trim_values = [True, False]
-
-    normalize_values = [True, False]
-
-    sequence_alignment_strategies = ["zeropad", "padwithfirstframe", "dtw"]
-
-    keypoint_selection_strategies = [
-        "removelegsandworld",
-        "reduceholistic",
-        "hands",
-        "youtubeaslkeypoints",
-    ]
-    fps_values = [
-        None,
-        15,
-        30,
-        45,
-        60,
-        120,
-    ]
+    trim_values = list(DEFAULT_METRIC_PARAMETERS["trim_values"])
+    normalize_values = list(DEFAULT_METRIC_PARAMETERS["normalize_values"])
+    sequence_alignment_strategies = list(DEFAULT_METRIC_PARAMETERS["sequence_alignment_strategies"])
+    keypoint_selection_strategies = list(DEFAULT_METRIC_PARAMETERS["keypoint_selection_strategies"])
+    fps_values = list(DEFAULT_METRIC_PARAMETERS["fps_values"])
 
     # Create all combinations
     metric_combinations = itertools.product(
