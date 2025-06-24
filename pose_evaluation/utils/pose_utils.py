@@ -238,3 +238,24 @@ def add_z_offsets_to_pose(pose: Pose, speed: float = 1.0) -> Pose:
 
     pose.body.data = pose_data
     return pose
+
+
+def pose_slice_frames(pose: Pose, start_index: int, end_index: int) -> Pose:
+    """
+    Return a new Pose object with body frames sliced from start_index to end_index.
+
+    Parameters
+    ----------
+    - pose (Pose): The original pose object.
+    - start_index (int): The starting frame index (inclusive).
+    - end_index (int): The ending frame index (exclusive).
+
+    Returns
+    -------
+    - Pose: A new Pose object with body data and confidence sliced accordingly.
+
+    """
+    pose = pose.copy()
+    pose.body.data = pose.body.data[start_index:end_index]
+    pose.body.confidence = pose.body.confidence[start_index:end_index]
+    return pose

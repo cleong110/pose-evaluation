@@ -16,6 +16,7 @@ from pose_evaluation.utils.pose_utils import (
     pose_fill_masked_or_invalid,
     pose_hide_low_conf,
     pose_remove_world_landmarks,
+    pose_slice_frames,
     reduce_poses_to_intersection,
     zero_pad_shorter_poses,
 )
@@ -394,3 +395,32 @@ def test_add_z_offsets_to_pose_varied_speeds(
         assert np.array_equal(ma.getmaskarray(updated_data), ma.getmaskarray(original_data)), (
             f"Speed {speed}: mask was modified"
         )
+
+
+def test_pose_slice_frames(mediapipe_poses_test_data: list["Pose"]):
+    # Use the first test pose
+    pose = mediapipe_poses_test_data[0]
+
+    total_frames = len(pose.body.data)
+    assert total_frames >= 10, "Test requires at least 10 frames"
+
+    start_idx = 3
+    end_idx = 8
+
+    sliced = pose_slice_frames(pose, start_idx, end_idx)
+
+    # Basic shape checks
+    assert sliced != pose
+    assert sliced.body.data.shape[0] == end_idx - start_idx
+    assert sliced.body.confidence.shape[0] == end_idx - start_idx
+
+    # Content checks
+    np.testing.assert_array_equal(sliced.body.data, pose.body.data[start_idx:end_idx])
+    np.testing.assert_array_equal(sliced.body.confidence, pose.body.confidence[start_idx:end_idx])
+
+    # Check masked array structure
+    assert isinstance(sliced.body.data, ma.MaskedArray)
+    assert sliced.body.data.mask.shape == pose.body.data[start_idx:end_idx].mask.shape
+
+    # Check that header was preserved
+    assert sliced.header == pose.header

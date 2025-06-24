@@ -3,12 +3,14 @@ from unittest.mock import MagicMock
 import pytest
 
 from pose_evaluation.evaluation.create_metrics import (
+    DEFAULT_METRIC_PARAMETERS,
     construct_metric,
     extract_metric_name_dist,
     extract_signature_distance,
     get_metrics,
 )
 
+# from pose_evaluation.evaluation.create_metrics import DEFAULT_METRIC_PARAMETERS
 # ---- Tests for extract_signature_distance ----
 
 
@@ -106,15 +108,11 @@ def test_get_metrics_uniqueness_and_consistency(include_return4, include_masked)
 
 
 def test_default_metric_parameters_are_lists():
-    from pose_evaluation.metrics.metric_construction import DEFAULT_METRIC_PARAMETERS
-
     for key, value in DEFAULT_METRIC_PARAMETERS.items():
         assert isinstance(value, list), f"{key} should be a list"
         assert value, f"{key} list should not be empty"
 
 
 def test_masked_fill_value_is_not_mutated():
-    from pose_evaluation.metrics.metric_construction import DEFAULT_METRIC_PARAMETERS, get_metrics
-
     _ = get_metrics(include_masked=True)
     assert None not in DEFAULT_METRIC_PARAMETERS["masked_fill_values"], "masked_fill_values should not be mutated"
