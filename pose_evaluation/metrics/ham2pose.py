@@ -1,18 +1,35 @@
 # https://github.com/sign-language-processing/pose-evaluation/issues/31
 
+from typing import Any
+
 import numpy.ma as ma
+from scipy.spatial.distance import euclidean
 from tqdm import tqdm
 
 from pose_evaluation.metrics.distance_measure import AggregatedDistanceMeasure
+from pose_evaluation.metrics.distance_metric import DistanceMetric
+from pose_evaluation.metrics.dtw_metric import DTWAggregatedDistanceMeasure
+from pose_evaluation.metrics.pose_processors import (
+    FillMaskedOrInvalidValuesPoseProcessor,
+    NormalizePosesProcessor,
+    ReduceHolisticProcessor,
+    RemoveWorldLandmarksProcessor,
+    ZeroPadShorterPosesProcessor,
+)
 
-# class Ham2Pose_MSE(AggregatedDistanceMetric):
-#     pass
+
+def get_standard_ham2pose_preprocessors():
+    """Replicate get_pose and normalize_pose from https://github.com/J22Melody/iict-eval-private/blob/text2pose/metrics/metrics.py#L15C1-L33C16"""
+    pose_preprocessors = [RemoveWorldLandmarksProcessor(), ReduceHolisticProcessor(), NormalizePosesProcessor()]
+    return pose_preprocessors
 
 
-class Ham2PoseMSEDistanceMeasure(AggregatedDistanceMeasure):
+class Ham2PosenMSEDistanceMeasure(AggregatedDistanceMeasure):
+    """Distance Measure that replicates `mse` from Ham2Pose"""
+
     def __init__(self):
         super().__init__(
-            name="Ham2PoseMSEDistanceMeasure",
+            name="Ham2Pose_nMSEDistanceMeasure",
             default_distance=0.0,
             aggregation_strategy="mean",
         )
@@ -33,10 +50,36 @@ class Ham2PoseMSEDistanceMeasure(AggregatedDistanceMeasure):
         return self._aggregate(trajectory_distances)
 
 
+class Ham2PosenMSEMetric(DistanceMetric):
+    """Using the `mse` distance, replicates "nMSE" metric from Ham2Pose"""
+
+    def __init__(
+        self,
+        **kwargs: Any,
+    ) -> None:
+        pose_preprocessors = get_standard_ham2pose_preprocessors()
+        pose_preprocessors.extend(
+            [
+                ZeroPadShorterPosesProcessor(),
+                FillMaskedOrInvalidValuesPoseProcessor(masked_fill_value=0.0),
+            ]
+        )
+        distance_measure = Ham2PosenMSEDistanceMeasure()
+        super().__init__(
+            name="Ham2Pose_nMSE",
+            higher_is_better=False,
+            distance_measure=distance_measure,
+            pose_preprocessors=pose_preprocessors,
+            **kwargs,
+        )
+
+
 class Ham2PoseAPEDistanceMeasure(AggregatedDistanceMeasure):
+    """Replicates the 'APE' distance from Ham2Pose"""
+
     def __init__(self):
         super().__init__(
-            name="Ham2PoseMSEDistanceMeasure",
+            name="Ham2Pose_nAPEDistanceMeasure",
             default_distance=0.0,
             aggregation_strategy="mean",
         )
@@ -57,71 +100,115 @@ class Ham2PoseAPEDistanceMeasure(AggregatedDistanceMeasure):
         return self._aggregate(trajectory_distances)
 
 
-# class Ham2Pose_APE(AggregatedDistanceMetric):
-#     pass
+class Ham2PosenAPEMetric(DistanceMetric):
+    """Using the 'APE' distance, replicates 'nAPE' from Ham2Pose"""
+
+    def __init__(
+        self,
+        # name: str,
+        # distance_measure: DistanceMeasure,
+        **kwargs: Any,
+    ) -> None:
+        # standard...
+        pose_preprocessors = get_standard_ham2pose_preprocessors()
+        pose_preprocessors.extend(
+            [
+                ZeroPadShorterPosesProcessor(),
+                FillMaskedOrInvalidValuesPoseProcessor(masked_fill_value=0.0),
+            ]
+        )
+        distance_measure = Ham2PoseAPEDistanceMeasure()
+        super().__init__(
+            name="Ham2Pose_nAPE",
+            higher_is_better=False,
+            distance_measure=distance_measure,
+            pose_preprocessors=pose_preprocessors,
+            **kwargs,
+        )
 
 
-# class Ham2PoseMetric(DistanceMetric):
-#     def __init__(
-#         self,
-#         name: str,
-
-#         **kwargs: Any,
-#     ) -> None:
-#         pose_preprocessors = [RemoveWorldLandmarksProcessor(), ReduceHolisticProcessor(), NormalizePosesProcessor()]
-#         super().__init__(name=name, higher_is_better=False, pose_preprocessors, **kwargs)
-
-
-# class Ham2PoseDTW(Ham2PoseMetric):
-#     def __init__(
-#         self,
-#         name: str,
-#         distance_measure: DistanceMeasure,
-#         **kwargs: Any,
-#     ) -> None:
-
-# TODO: Masked Fill with zeros, then euclidean
+def unmasked_euclidean(point1, point2):
+    """Copied from Ham2Pose"""
+    if ma.is_masked(point2):  # reference label keypoint is missing
+        return euclidean((0, 0, 0), point1)
+    elif ma.is_masked(point1):  # reference label keypoint is not missing, other label keypoint is missing
+        return euclidean((0, 0, 0), point2)
+    d = euclidean(point1, point2)
+    return d
 
 
-# class Ham2PosenDTW(DistanceMetric):
-#     pass
+class Ham2PoseUnmaskedEuclideanDTWDistanceMeasure(DTWAggregatedDistanceMeasure):
+    """
+    using unmasked_euclidean function, replicates fastdtw from ham2pose
+    Ham2Pose does dist = fastdtw(pose1_keypoint_trajectory, pose2_keypoint_trajectory, dist=masked_euclidean)[0] for each keypoint trajectory
+    DTWAggregatedDistanceMeasure calls distance, _ = fastdtw(hyp_trajectory, ref_trajectory, dist=self._calculate_pointwise_distances) for each trajectory
+    So we only need to override _calculate_pointwise_distances
+    """
+
+    def _calculate_pointwise_distances(self, hyp_data: ma.MaskedArray, ref_data: ma.MaskedArray) -> ma.MaskedArray:
+        return unmasked_euclidean(hyp_data, ref_data)
 
 
-# class Ham2PoseMSEMetric(DistanceMetric):
-#     def __init__(normalize=False):
-#         name = "MSE"
-#         if normalize:
-#             name = f"n{name}"
-#         super().__init__(
-#             name=name,
-#         )
+class Ham2PoseDTWMetric(DistanceMetric):
+    """
+    Uses Ham2PoseUnmaskedEuclideanDTWDistanceMeasure to replicate 'DTW' from Ham2Pose.
+    Preprocessing is standard Ham2Pose,
+    we just need to call unmasked_euclidean on each trajectory and take the mean
+    """
 
-#         # TODO: ZeroPad and MaskedFill and Reduce to Intersection
-#         # TODO: zero-fill positions where EITHER is masked???
-#         # TODO: Upper body and hands only https://github.com/J22Melody/iict-eval-private/blob/text2pose/metrics/ham2pose.py#L195
-#         # https://github.com/J22Melody/iict-eval-private/blob/text2pose/metrics/metrics.py#L22 maybe this?
-#         self.pose_preprocessors.append(processor)
-
-#         if normalize:
-
-
-# TODO: Distance Measure
-
-
-def ham2pose_mse_trajectory_distance(trajectory1, trajectory2):
-    sq_error = ma.power(trajectory1 - trajectory2, 2).sum(-1)
-    return sq_error
+    def __init__(
+        self,
+        **kwargs: Any,
+    ) -> None:
+        pose_preprocessors = get_standard_ham2pose_preprocessors()
+        distance_measure = Ham2PoseUnmaskedEuclideanDTWDistanceMeasure()
+        super().__init__(
+            name="Ham2Pose_DTW",
+            higher_is_better=False,
+            distance_measure=distance_measure,
+            pose_preprocessors=pose_preprocessors,
+            **kwargs,
+        )
 
 
-def ham2pose_ape_trajectory_distance(trajectory1, trajectory2):
-    return ma.sqrt(ham2pose_mse_trajectory_distance(trajectory1, trajectory2)).mean()
+def masked_euclidean(point1, point2):
+    """Copied from Ham2Pose"""
+    if ma.is_masked(point2):  # reference label keypoint is missing
+        return 0
+    elif ma.is_masked(point1):  # reference label keypoint is not missing, other label keypoint is missing
+        return euclidean((0, 0, 0), point2) / 2
+    d = euclidean(point1, point2)
+    return d
 
 
-# No need for this if we just do FillMasked
-# def ham2pose_unmasked_euclidean_point_distance(point1, point2):
-#     if np.ma.is_masked(point2):  # reference label keypoint is missing
-#         return euclidean((0, 0, 0), point1)
-#     elif np.ma.is_masked(point1):  # reference label keypoint is not missing, other label keypoint is missing
-#         return euclidean((0, 0, 0), point2)
-#     d = euclidean(point1, point2)
-#     return d
+class Ham2PoseMaskedEuclideanDTWDistanceMeasure(DTWAggregatedDistanceMeasure):
+    """
+    using umasked_euclidean function, replicates 'nfastdtw' from ham2pose
+    Ham2Pose does dist = fastdtw(pose1_keypoint_trajectory, pose2_keypoint_trajectory, dist=masked_euclidean)[0] for each keypoint trajectory
+    DTWAggregatedDistanceMeasure calls distance, _ = fastdtw(hyp_trajectory, ref_trajectory, dist=self._calculate_pointwise_distances) for each trajectory
+    So we only need to override _calculate_pointwise_distances to use 'masked_euclidean' function
+    """
+
+    def _calculate_pointwise_distances(self, hyp_data: ma.MaskedArray, ref_data: ma.MaskedArray) -> ma.MaskedArray:
+        return masked_euclidean(hyp_data, ref_data)
+
+
+class Ham2PosenDTWMetric(DistanceMetric):
+    """
+    Uses Ham2PoseUnmaskedEuclideanDTWDistanceMeasure to replicate 'nDTW' from Ham2Pose.
+    Everything's the same as 'Ham2PoseDTWMetric' except the use of 'masked_euclidean'
+    """
+
+    def __init__(
+        self,
+        **kwargs: Any,
+    ) -> None:
+        pose_preprocessors = get_standard_ham2pose_preprocessors()
+        distance_measure = Ham2PoseMaskedEuclideanDTWDistanceMeasure()
+        super().__init__(
+            name="Ham2Pose_nDTW",
+            higher_is_better=False,
+            distance_measure=distance_measure,
+            pose_preprocessors=pose_preprocessors,
+            **kwargs,
+        )
