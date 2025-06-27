@@ -2,6 +2,7 @@
 
 from typing import Any
 
+import numpy as np
 import numpy.ma as ma
 from scipy.spatial.distance import euclidean
 from tqdm import tqdm
@@ -12,7 +13,7 @@ from pose_evaluation.metrics.dtw_metric import DTWAggregatedDistanceMeasure
 from pose_evaluation.metrics.pose_processors import (
     FillMaskedOrInvalidValuesPoseProcessor,
     NormalizePosesProcessor,
-    ReduceHolisticProcessor,
+    ReduceHolisticPoseProcessor,
     RemoveWorldLandmarksProcessor,
     ZeroPadShorterPosesProcessor,
 )
@@ -20,7 +21,7 @@ from pose_evaluation.metrics.pose_processors import (
 
 def get_standard_ham2pose_preprocessors():
     """Replicate get_pose and normalize_pose from https://github.com/J22Melody/iict-eval-private/blob/text2pose/metrics/metrics.py#L15C1-L33C16"""
-    pose_preprocessors = [RemoveWorldLandmarksProcessor(), ReduceHolisticProcessor(), NormalizePosesProcessor()]
+    pose_preprocessors = [RemoveWorldLandmarksProcessor(), ReduceHolisticPoseProcessor(), NormalizePosesProcessor()]
     return pose_preprocessors
 
 
@@ -34,7 +35,56 @@ class Ham2PosenMSEDistanceMeasure(AggregatedDistanceMeasure):
             aggregation_strategy="mean",
         )
 
+    def _mse_trajectory_distance(self, trajectory1, trajectory2):
+        """
+        Copied from
+        https://github.com/J22Melody/iict-eval-private/blob/text2pose/metrics/ham2pose.py#L102C1-L115C27
+        and annotated.
+        """
+        # We don't need this, we have Zero-Padding preprocessor
+        # if len(trajectory1) < len(trajectory2):
+        #     diff = len(trajectory2) - len(trajectory1)
+        #     trajectory1 = np.concatenate((trajectory1, np.zeros((diff, 3))))
+        # elif len(trajectory2) < len(trajectory1):
+        #     trajectory2 = np.concatenate((trajectory2, np.zeros((len(trajectory1) - len(trajectory2), 3))))
+
+        # This masks locations where EITHER pose is masked, not the same thing as
+        # FillMaskedOrInvalidValuesPoseProcessor
+        pose1_mask = np.ma.getmask(trajectory1)
+        pose2_mask = np.ma.getmask(trajectory2)
+        trajectory1[pose1_mask] = 0
+        trajectory1[pose2_mask] = 0
+        trajectory2[pose1_mask] = 0
+        trajectory2[pose2_mask] = 0
+
+        # Assumption is we've already run the preprocessors
+        assert ma.count_masked(trajectory1) == 0
+        assert ma.count_masked(trajectory2) == 0
+        assert len(trajectory1) == len(trajectory2)
+        trajectory1 = np.asarray(trajectory1)
+        trajectory2 = np.asarray(trajectory2)
+
+        sq_error = np.power(trajectory1 - trajectory2, 2).sum(-1)
+        print(type(trajectory1))
+        print(type(trajectory2))
+        print(trajectory1.shape)
+        print("Traj 1 masked", ma.count_masked(trajectory1))
+        print("Traj 1 masked", ma.count_masked(trajectory2))
+        print(f"Trajectory 1 sum: {trajectory1.sum()}")
+        print(f"Trajectory 2 sum: {trajectory2.sum()}")
+        print(f"sq_error shape: {sq_error.shape}")
+        print(f"sq_error mean: {sq_error.mean()}")
+        print("****")
+        return sq_error.mean()
+
     def get_distance(self, hyp_data: ma.MaskedArray, ref_data: ma.MaskedArray, progress=False) -> float:
+        """
+        Mimic code from compare_poses at
+        https://github.com/J22Melody/iict-eval-private/blob/text2pose/metrics/ham2pose.py#L163-L192
+        which sums up all the trajectory distances, then takes the mean
+        """
+        print(hyp_data.shape)
+        print(ref_data.shape)
         keypoint_count = hyp_data.shape[2]  # Assuming shape: (frames, person, keypoints, xyz)
         trajectory_distances = ma.empty(keypoint_count)  # Preallocate a NumPy array
 
@@ -44,9 +94,9 @@ class Ham2PosenMSEDistanceMeasure(AggregatedDistanceMeasure):
             total=keypoint_count,
             disable=not progress,
         ):
-            sq_error = ma.power(hyp_trajectory - ref_trajectory, 2).sum(-1)
-            trajectory_distances[i] = sq_error  # Store distance in the preallocated array
+            trajectory_distances[i] = self._mse_trajectory_distance(hyp_trajectory, ref_trajectory)
         trajectory_distances = ma.array(trajectory_distances)
+        # print(trajectory_distances)
         return self._aggregate(trajectory_distances)
 
 
@@ -61,13 +111,12 @@ class Ham2PosenMSEMetric(DistanceMetric):
         pose_preprocessors.extend(
             [
                 ZeroPadShorterPosesProcessor(),
-                FillMaskedOrInvalidValuesPoseProcessor(masked_fill_value=0.0),
+                # FillMaskedOrInvalidValuesPoseProcessor(masked_fill_value=0.0),
             ]
         )
         distance_measure = Ham2PosenMSEDistanceMeasure()
         super().__init__(
             name="Ham2Pose_nMSE",
-            higher_is_better=False,
             distance_measure=distance_measure,
             pose_preprocessors=pose_preprocessors,
             **kwargs,
@@ -120,7 +169,6 @@ class Ham2PosenAPEMetric(DistanceMetric):
         distance_measure = Ham2PoseAPEDistanceMeasure()
         super().__init__(
             name="Ham2Pose_nAPE",
-            higher_is_better=False,
             distance_measure=distance_measure,
             pose_preprocessors=pose_preprocessors,
             **kwargs,
@@ -141,12 +189,16 @@ class Ham2PoseUnmaskedEuclideanDTWDistanceMeasure(DTWAggregatedDistanceMeasure):
     """
     using unmasked_euclidean function, replicates fastdtw from ham2pose
     Ham2Pose does dist = fastdtw(pose1_keypoint_trajectory, pose2_keypoint_trajectory, dist=masked_euclidean)[0] for each keypoint trajectory
-    DTWAggregatedDistanceMeasure calls distance, _ = fastdtw(hyp_trajectory, ref_trajectory, dist=self._calculate_pointwise_distances) for each trajectory
+    DTWAggregatedDistanceMeasure calls distance, _ = fastdtw(hyp_trajectory, ref_trajectory, dist=self._calculate_pointwise_distances)
+    for each trajectory
+    And then finds the mean with self._aggregate(trajectory_distances), mean by default
+
     So we only need to override _calculate_pointwise_distances
+
     """
 
     def _calculate_pointwise_distances(self, hyp_data: ma.MaskedArray, ref_data: ma.MaskedArray) -> ma.MaskedArray:
-        return unmasked_euclidean(hyp_data, ref_data)
+        return ma.array([unmasked_euclidean(hyp_data, ref_data)])
 
 
 class Ham2PoseDTWMetric(DistanceMetric):
@@ -164,7 +216,6 @@ class Ham2PoseDTWMetric(DistanceMetric):
         distance_measure = Ham2PoseUnmaskedEuclideanDTWDistanceMeasure()
         super().__init__(
             name="Ham2Pose_DTW",
-            higher_is_better=False,
             distance_measure=distance_measure,
             pose_preprocessors=pose_preprocessors,
             **kwargs,
@@ -190,7 +241,7 @@ class Ham2PoseMaskedEuclideanDTWDistanceMeasure(DTWAggregatedDistanceMeasure):
     """
 
     def _calculate_pointwise_distances(self, hyp_data: ma.MaskedArray, ref_data: ma.MaskedArray) -> ma.MaskedArray:
-        return masked_euclidean(hyp_data, ref_data)
+        return ma.array([masked_euclidean(hyp_data, ref_data)])
 
 
 class Ham2PosenDTWMetric(DistanceMetric):
@@ -207,8 +258,10 @@ class Ham2PosenDTWMetric(DistanceMetric):
         distance_measure = Ham2PoseMaskedEuclideanDTWDistanceMeasure()
         super().__init__(
             name="Ham2Pose_nDTW",
-            higher_is_better=False,
             distance_measure=distance_measure,
             pose_preprocessors=pose_preprocessors,
             **kwargs,
         )
+
+
+# TODO: test these all return compatible types e.g. calculate_pointwise_distances should return (1,)

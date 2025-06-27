@@ -16,9 +16,10 @@ class DistanceMetric(PoseMetric):
         self,
         name: str,
         distance_measure: DistanceMeasure,
+        higher_is_better=False,
         **kwargs: Any,
     ) -> None:
-        super().__init__(name=name, higher_is_better=False, **kwargs)
+        super().__init__(name=name, higher_is_better=higher_is_better, **kwargs)
 
         self.distance_measure = distance_measure
 

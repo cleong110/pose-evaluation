@@ -27,6 +27,20 @@ class DTWAggregatedDistanceMeasure(AggregatedDistanceMeasure):
             aggregation_strategy=aggregation_strategy,
         )
 
+    def _to_scalar(self, x: ma.MaskedArray | float, fallback="raise") -> float:
+        """Sometimes, e.g. in cases where both trajectories are fully masked, fastdtw returns a float"""
+        if isinstance(x, ma.MaskedArray):
+            if x is ma.masked or np.any(x.mask):
+                if fallback == "raise":
+                    raise ValueError("Masked value encountered in masked array")
+                return float("nan") if fallback == "nan" else float(fallback)
+            return float(x.data)
+        if isinstance(x, float) and np.isnan(x):
+            if fallback == "raise":
+                raise ValueError("NaN encountered in float")
+            return float("nan") if fallback == "nan" else float(fallback)
+        return float(x)
+
     def get_distance(self, hyp_data: ma.MaskedArray, ref_data: ma.MaskedArray, progress=False) -> float:
         keypoint_count = hyp_data.shape[2]  # Assuming shape: (frames, person, keypoints, xyz)
         trajectory_distances = ma.empty(keypoint_count)  # Preallocate a NumPy array
@@ -38,8 +52,22 @@ class DTWAggregatedDistanceMeasure(AggregatedDistanceMeasure):
             disable=not progress,
         ):
             distance, _ = fastdtw(hyp_trajectory, ref_trajectory, dist=self._calculate_pointwise_distances)
-            # distance is an ndarray of shape (1,)
-            trajectory_distances[i] = distance.item()  # Store distance in the preallocated array
+            # assert isinstance(distance, ma.core.MaskedArray), (
+            #     f"Distance: {distance} is not a masked array! \n*\thyp_trajectory: {hyp_trajectory},\n*\tref trajectory: {ref_trajectory}\n*\tpointwise distances {self._calculate_pointwise_distances}"
+            # )
+            if not isinstance(distance, ma.MaskedArray):
+                warnings.warn(
+                    f"Unmasked DTW result for trajectory pair {i}: {distance}, hyp shape: {hyp_trajectory.shape} with {ma.count_masked(hyp_trajectory)} masked, ref shape: {ref_trajectory.shape}  with {ma.count_masked(ref_trajectory)} masked",
+                    category=RuntimeWarning,
+                    stacklevel=2,
+                )
+
+            # distance from fastdtw is typically but not always an ndarray of shape (1,)
+            # but sometimes it returns a float, apparently in cases where
+            # both arrays are fully masked?
+            # trajectory_distances[i] = distance.item()  # Store distance in the preallocated array
+            trajectory_distances[i] = self._to_scalar(distance)
+
         trajectory_distances = ma.array(trajectory_distances)
         return self._aggregate(trajectory_distances)
 
