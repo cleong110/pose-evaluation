@@ -12,7 +12,9 @@ from pose_evaluation.utils.pose_utils import (
     first_frame_pad_shorter_poses,
     get_youtube_asl_mediapipe_keypoints,
     pose_fill_masked_or_invalid,
+    pose_hide_low_conf,
     pose_mask_invalid_values,
+    reduce_poses_to_components_from_first_pose,
     reduce_poses_to_intersection,
     zero_pad_shorter_poses,
 )
@@ -245,3 +247,26 @@ def get_standard_pose_processors(
     # TODO: Focus processor https://github.com/rotem-shalev/Ham2Pose/blob/main/metrics.py#L32-L62
 
     return pose_processors
+
+
+################## Ham2Pose
+class HideLowConfPoseProcessor(PoseProcessor):
+    def __init__(self, threshold: float = 0.2, name="hide_low_conf") -> None:
+        super().__init__(name)
+        self.threshold = threshold
+
+    def process_pose(self, pose: Pose) -> Pose:
+        pose = pose.copy()
+        pose_hide_low_conf(pose, confidence_threshold=self.threshold)
+        return pose
+
+
+class ReducePosesToFirstPoseComponentsProcessor(PoseProcessor):
+    def __init__(self, name="reduce_poses_to_first_pose_components") -> None:
+        super().__init__(name)
+
+    def process_pose(self, pose: Pose) -> Pose:
+        return self.process_poses([pose])[0]
+
+    def process_poses(self, poses: Iterable[Pose]) -> list[Pose]:
+        return reduce_poses_to_components_from_first_pose(poses)

@@ -57,10 +57,15 @@ def fixture_distance_range_checker() -> Callable[[torch.Tensor | np.ndarray, flo
 
 
 @pytest.fixture
-def real_pose_files() -> list[Pose]:
-    # pose_evaluation/utils/test/test_data/standard_landmarks
+def real_pose_file_paths() -> list[Path]:
     test_files_folder = Path("pose_evaluation") / "utils" / "test" / "test_data" / "mediapipe" / "standard_landmarks"
-    real_pose_files_list = [Pose.read(test_file.read_bytes()) for test_file in test_files_folder.glob("*.pose")]
+    return list(test_files_folder.glob("*.pose"))
+
+
+@pytest.fixture
+def real_pose_files(real_pose_file_paths) -> list[Pose]:
+    # pose_evaluation/utils/test/test_data/standard_landmarks
+    real_pose_files_list = [Pose.read(test_file.read_bytes()) for test_file in real_pose_file_paths]
     return real_pose_files_list
 
 

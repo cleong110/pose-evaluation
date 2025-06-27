@@ -44,6 +44,25 @@ def load_pose_file(pose_path: Path) -> Pose:
     return pose
 
 
+def reduce_poses_to_components_from_first_pose(
+    poses: Iterable["Pose"],
+):
+    """
+    Mimic behavior from Ham2Pose 'compare_poses' preprocessing as seen in
+    https://github.com/J22Melody/iict-eval-private/blob/text2pose/metrics/ham2pose.py#L163
+    """
+    pose1 = poses[0]
+    pose_components = [c.name for c in pose1.header.components]
+    pose_points = {c.name: c.points for c in pose1.header.components}
+    processed = []
+    for pose in poses:
+        # reduce pose2 the set of keypoints of pose1 (hypothesis)
+
+        pose = pose.get_components(pose_components, pose_points)
+        processed.append(pose)
+    return processed
+
+
 def reduce_poses_to_intersection(
     poses: Iterable["Pose"],
     progress: bool = False,

@@ -12,21 +12,28 @@ from pose_evaluation.metrics.distance_metric import DistanceMetric
 from pose_evaluation.metrics.dtw_metric import DTWAggregatedDistanceMeasure
 from pose_evaluation.metrics.pose_processors import (
     FillMaskedOrInvalidValuesPoseProcessor,
+    HideLowConfPoseProcessor,
     NormalizePosesProcessor,
     ReduceHolisticPoseProcessor,
+    ReducePosesToFirstPoseComponentsProcessor,
     RemoveWorldLandmarksProcessor,
     ZeroPadShorterPosesProcessor,
 )
 
 
-def get_standard_ham2pose_preprocessors():
+def get_standard_ham2pose_preprocessors(include_compare_pose_processors=False):
     """Replicate get_pose and normalize_pose from https://github.com/J22Melody/iict-eval-private/blob/text2pose/metrics/metrics.py#L15C1-L33C16"""
-    pose_preprocessors = [RemoveWorldLandmarksProcessor(), ReduceHolisticPoseProcessor(), NormalizePosesProcessor()]
-    return pose_preprocessors
+    get_pose_preprocessors = [RemoveWorldLandmarksProcessor(), ReduceHolisticPoseProcessor(), NormalizePosesProcessor()]
+
+    compare_poses_preprocessors = [ReducePosesToFirstPoseComponentsProcessor(), HideLowConfPoseProcessor()]
+    if not include_compare_pose_processors:
+        return get_pose_preprocessors
+    else:
+        return get_pose_preprocessors + compare_poses_preprocessors
 
 
 class Ham2PosenMSEDistanceMeasure(AggregatedDistanceMeasure):
-    """Distance Measure that replicates `mse` from Ham2Pose"""
+    """Distance Measure that replicates `mse` from Ham2Pose. We use"""
 
     def __init__(self):
         super().__init__(
@@ -41,12 +48,12 @@ class Ham2PosenMSEDistanceMeasure(AggregatedDistanceMeasure):
         https://github.com/J22Melody/iict-eval-private/blob/text2pose/metrics/ham2pose.py#L102C1-L115C27
         and annotated.
         """
-        # We don't need this, we have Zero-Padding preprocessor
-        # if len(trajectory1) < len(trajectory2):
-        #     diff = len(trajectory2) - len(trajectory1)
-        #     trajectory1 = np.concatenate((trajectory1, np.zeros((diff, 3))))
-        # elif len(trajectory2) < len(trajectory1):
-        #     trajectory2 = np.concatenate((trajectory2, np.zeros((len(trajectory1) - len(trajectory2), 3))))
+        # We theoretically don't need this, we have Zero-Padding preprocessor
+        if len(trajectory1) < len(trajectory2):
+            diff = len(trajectory2) - len(trajectory1)
+            trajectory1 = np.concatenate((trajectory1, np.zeros((diff, 3))))
+        elif len(trajectory2) < len(trajectory1):
+            trajectory2 = np.concatenate((trajectory2, np.zeros((len(trajectory1) - len(trajectory2), 3))))
 
         # This masks locations where EITHER pose is masked, not the same thing as
         # FillMaskedOrInvalidValuesPoseProcessor
@@ -65,14 +72,14 @@ class Ham2PosenMSEDistanceMeasure(AggregatedDistanceMeasure):
         trajectory2 = np.asarray(trajectory2)
 
         sq_error = np.power(trajectory1 - trajectory2, 2).sum(-1)
-        print(type(trajectory1))
-        print(type(trajectory2))
-        print(trajectory1.shape)
-        print("Traj 1 masked", ma.count_masked(trajectory1))
-        print("Traj 1 masked", ma.count_masked(trajectory2))
+        # print(type(trajectory1))
+        # print(type(trajectory2))
+        # print(trajectory1.shape)
+        # print("Traj 1 masked", ma.count_masked(trajectory1))
+        # print("Traj 1 masked", ma.count_masked(trajectory2))
         print(f"Trajectory 1 sum: {trajectory1.sum()}")
         print(f"Trajectory 2 sum: {trajectory2.sum()}")
-        print(f"sq_error shape: {sq_error.shape}")
+        # print(f"sq_error shape: {sq_error.shape}")
         print(f"sq_error mean: {sq_error.mean()}")
         print("****")
         return sq_error.mean()
@@ -87,6 +94,7 @@ class Ham2PosenMSEDistanceMeasure(AggregatedDistanceMeasure):
         print(ref_data.shape)
         keypoint_count = hyp_data.shape[2]  # Assuming shape: (frames, person, keypoints, xyz)
         trajectory_distances = ma.empty(keypoint_count)  # Preallocate a NumPy array
+        distances_for_checking_deletethis = []
 
         for i, (hyp_trajectory, ref_trajectory) in tqdm(
             enumerate(self._get_keypoint_trajectories(hyp_data, ref_data)),
@@ -94,9 +102,14 @@ class Ham2PosenMSEDistanceMeasure(AggregatedDistanceMeasure):
             total=keypoint_count,
             disable=not progress,
         ):
-            trajectory_distances[i] = self._mse_trajectory_distance(hyp_trajectory, ref_trajectory)
+            dist = self._mse_trajectory_distance(hyp_trajectory, ref_trajectory)
+            print("Type of traj distance", type(dist))
+            trajectory_distances[i] = dist
+            distances_for_checking_deletethis.append(dist)
         trajectory_distances = ma.array(trajectory_distances)
-        # print(trajectory_distances)
+        # for i, dist in enumerate(distances_for_checking_deletethis):
+        #     print(f"dist {i}: {dist}")
+        # print(f"Total of {len(trajectory_distances)} trajectory distances: {trajectory_distances.sum()}")
         return self._aggregate(trajectory_distances)
 
 
@@ -110,8 +123,8 @@ class Ham2PosenMSEMetric(DistanceMetric):
         pose_preprocessors = get_standard_ham2pose_preprocessors()
         pose_preprocessors.extend(
             [
-                ZeroPadShorterPosesProcessor(),
-                # FillMaskedOrInvalidValuesPoseProcessor(masked_fill_value=0.0),
+                # ZeroPadShorterPosesProcessor(),
+                # FillMaskedOrInvalidValuesPoseProcessor(masked_fill_value=0.0), # handled internally
             ]
         )
         distance_measure = Ham2PosenMSEDistanceMeasure()
