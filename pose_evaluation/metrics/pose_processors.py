@@ -268,5 +268,5 @@ class ReducePosesToFirstPoseComponentsProcessor(PoseProcessor):
     def process_pose(self, pose: Pose) -> Pose:
         return self.process_poses([pose])[0]
 
-    def process_poses(self, poses: Iterable[Pose]) -> list[Pose]:
+    def process_poses(self, poses: Iterable[Pose], progress=False) -> list[Pose]:
         return reduce_poses_to_components_from_first_pose(poses)

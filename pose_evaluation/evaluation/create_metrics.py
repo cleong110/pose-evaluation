@@ -22,6 +22,12 @@ from pose_evaluation.metrics.distance_measure import (
 from pose_evaluation.metrics.distance_metric import DistanceMetric
 from pose_evaluation.metrics.dtw_metric import DTWDTAIImplementationDistanceMeasure
 from pose_evaluation.metrics.embedding_distance_metric import EmbeddingDistanceMetric
+from pose_evaluation.metrics.ham2pose import (
+    Ham2PoseDTWMetric,
+    Ham2PosenAPEMetric,
+    Ham2PosenDTWMetric,
+    Ham2PosenMSEMetric,
+)
 from pose_evaluation.metrics.nonsense_measures import Return4Measure
 from pose_evaluation.metrics.pose_processors import (
     AddTOffsetsToZPoseProcessor,
@@ -196,11 +202,16 @@ def get_embedding_metrics(df: pd.DataFrame) -> list:
         raise ValueError(f"No {DatasetDFCol.EMBEDDING_MODEL}")
 
 
+def get_ham2pose_metrics() -> list:
+    return [Ham2PosenMSEMetric(), Ham2PosenAPEMetric(), Ham2PoseDTWMetric(), Ham2PosenDTWMetric()]
+
+
 def get_metrics(
     measures: list[DistanceMeasure] | None = None,
     include_return4=True,
     metrics_out: Path | None = None,
     include_masked: bool | None = False,
+    include_ham2pose: bool = False,
 ):
     metrics = []
 
@@ -310,6 +321,8 @@ def get_metrics(
                 name="Return4Metric_defaultdist4.0", distance_measure=Return4Measure(), pose_preprocessors=[]
             )
         )
+    if include_ham2pose:
+        metrics.extend(get_ham2pose_metrics())
 
     metric_names = [metric.name for metric in metrics]
     metric_sigs = [metric.get_signature().format() for metric in metrics]
@@ -342,7 +355,7 @@ def get_metrics(
 
 
 if __name__ == "__main__":
-    metrics = get_metrics(metrics_out="constructed.csv", include_return4=True)
+    metrics = get_metrics(metrics_out="constructed.csv", include_return4=True, include_ham2pose=True)
     metric_names = [m.name for m in metrics]
     metric_sigs = [m.get_signature().format() for m in metrics]
 

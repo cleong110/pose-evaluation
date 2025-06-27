@@ -13,7 +13,7 @@ import typer
 from pose_format import Pose
 from tqdm import tqdm
 
-from pose_evaluation.evaluation.create_metrics import get_embedding_metrics, get_metrics
+from pose_evaluation.evaluation.create_metrics import get_embedding_metrics, get_ham2pose_metrics, get_metrics
 from pose_evaluation.evaluation.dataset_parsing.dataset_utils import DatasetDFCol
 from pose_evaluation.evaluation.score_dataframe_format import ScoreDFCol
 from pose_evaluation.metrics.distance_metric import DistanceMetric
@@ -576,6 +576,7 @@ def main(
         100,
         help="Batch size for the workers. This is the number of hyps, so distances per batch will be this squared",
     ),
+    include_ham2pose: bool = typer.Option(False, help="whether to add in the ham2pose metrics"),
     filter_metrics: bool = typer.Option(True, help="whether to use the filtered set of metrics"),
     embedding_metrics: bool = typer.Option(False, help="whether to add in embedding metric"),
     specific_metrics: list[str] = typer.Option(
@@ -618,6 +619,9 @@ def main(
     typer.echo(f"* Pose Files: {len(df[DatasetDFCol.POSE_FILE_PATH].unique())}")
 
     metrics = get_metrics()  # generate all possible metrics
+
+    if include_ham2pose:
+        metrics.extend(get_ham2pose_metrics())
     # typer.echo(f"Metrics: {[m.name for m in metrics]}")
     typer.echo(f"We have a total of {len(metrics)} metrics")
 
@@ -789,6 +793,13 @@ if __name__ == "__main__":
 
 # startendtrimmed_normalizedbyshoulders_hands_defaultdist0.0_nointerp_dtw_fillmasked0.0_dtaiDTWAggregatedDistanceMetricFast
 # conda activate /opt/home/cleong/envs/pose_eval_src && cd /opt/home/cleong/projects/pose-evaluation && python pose_evaluation/evaluation/load_splits_and_run_metrics.py dataset_dfs/asl-citizen.csv --splits "train,test" --full --max-workers 24 --batch-size 100 --specific-metrics "startendtrimmed_normalizedbyshoulders_hands_defaultdist0.0_nointerp_dtw_fillmasked0.0_dtaiDTWAggregatedDistanceMetricFast" --full-intersplit --out metric_results_full_matrix/ 2>&1|tee out/full_matrix$(date +%s).txt
+
+# best APE metric of about 4.6k: startendtrimmed_normalizedbyshoulders_youtubeaslkeypoints_defaultdist1.0_nointerp_padwithfirstframe_fillmasked1.0_AggregatedPowerDistanceMetric
+# METRIC="startendtrimmed_normalizedbyshoulders_youtubeaslkeypoints_defaultdist1.0_nointerp_padwithfirstframe_fillmasked1.0_AggregatedPowerDistanceMetric" && conda activate /opt/home/cleong/envs/pose_eval_src && cd /opt/home/cleong/projects/pose-evaluation && python pose_evaluation/evaluation/load_splits_and_run_metrics.py dataset_dfs/asl-citizen.csv --splits "train,test" --full --max-workers 24 --batch-size 100 --specific-metrics "$METRIC" --full-intersplit --out metric_results_full_matrix/ 2>&1|tee out/"full_matrix_$METRIC_$(date +%s).txt"
+
+# one of the pareto frontier for DTW metrics,
+# untrimmed_unnormalized_hands_defaultdist0.0_nointerp_dtw_fillmasked100.0_dtaiDTWAggregatedDistanceMetricFast
+# METRIC="untrimmed_unnormalized_hands_defaultdist0.0_nointerp_dtw_fillmasked100.0_dtaiDTWAggregatedDistanceMetricFast" && conda activate /opt/home/cleong/envs/pose_eval_src && cd /opt/home/cleong/projects/pose-evaluation && python pose_evaluation/evaluation/load_splits_and_run_metrics.py dataset_dfs/asl-citizen.csv --splits "train,test" --full --max-workers 24 --batch-size 100 --specific-metrics "$METRIC" --full-intersplit --out metric_results_full_matrix/ 2>&1|tee out/"full_matrix_$METRIC_$(date +%s).txt"
 
 # monitor progress:
 # conda activate /opt/home/cleong/envs/pose_eval_src && cd /opt/home/cleong/projects/pose-evaluation && watch python pose_evaluation/analysis/count_files_by_hour.py metric_results_full_matrix/scores/batches_untrimmed_zspeed1.0_normalizedbyshoulders_reduceholistic_defaultdist10.0_nointerp_dtw_fillmasked10.0_dtaiDTWAggregatedDistanceMetricFast_asl-citizen_train/ --target-count 40401
