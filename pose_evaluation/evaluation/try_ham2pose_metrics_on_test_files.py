@@ -1,8 +1,10 @@
 import warnings
+from itertools import product
 from pathlib import Path
 
 import pandas as pd
 from pose_format import Pose
+from tqdm import tqdm
 
 from pose_evaluation.metrics.distance_metric import DistanceMetric
 from pose_evaluation.metrics.dtw_metric import DTWDTAIImplementationDistanceMeasure
@@ -22,10 +24,11 @@ from pose_evaluation.metrics.ham2pose import (
 # )
 
 if __name__ == "__main__":
-    # poses_dir = Path("/opt/home/cleong/projects/pose-evaluation/pose_evaluation/utils/test/test_data")
-    poses_dir = Path("/opt/home/cleong/projects/pose-evaluation/files_to_check_for_ham2pose/ASL_CITIZEN")
+    poses_dir = Path("pose_evaluation/utils/test/test_data")
+    # poses_dir = Path("/opt/home/cleong/projects/pose-evaluation/files_to_check_for_ham2pose/ASL_CITIZEN")
     # poses_dir = Path("/opt/home/cleong/projects/pose-evaluation/files_to_check_for_ham2pose/colin/house")
-    poses_dir = Path("/opt/home/cleong/projects/pose-evaluation/files_to_check_for_ham2pose/")
+    # poses_dir = Path("/opt/home/cleong/projects/pose-evaluation/files_to_check_for_ham2pose/colin")
+    # poses_dir = Path("/opt/home/cleong/projects/pose-evaluation/files_to_check_for_ham2pose/")
     poses = list(poses_dir.rglob("*.pose"))
     entries = []
 
@@ -55,8 +58,10 @@ if __name__ == "__main__":
         ),
     }
 
-    # for pose_ref_path, pose_hyp_path in tqdm(product(poses, poses), desc="Calculating scores"):
-    for pose_ref_path, pose_hyp_path in [(poses[0], poses[1])]:
+    pose_pairs = list(product(poses, poses))
+
+    for pose_ref_path, pose_hyp_path in tqdm(pose_pairs, desc="Scoring pose pairs"):
+        # for pose_ref_path, pose_hyp_path in [(poses[0], poses[1])]:
         entry = {
             "ref": pose_ref_path,
             "hyp": pose_hyp_path,
@@ -83,7 +88,7 @@ if __name__ == "__main__":
                 try:
                     score = distance_fn.score_with_signature(pose_hyp, pose_ref)
                     entry[name] = score.score
-                    entry["signature"] = distance_fn.get_signature().format()
+                    entry[f"{name}_signature"] = distance_fn.get_signature().format()
                 except ValueError as e:
                     entry[f"{name}_ERROR"] = str(e)
 
@@ -150,7 +155,9 @@ if __name__ == "__main__":
                 mean_diff = percent_diff.mean()
                 print(f"  Mean % difference (non-NaN only): {mean_diff:.2f}%")
                 output_path = poses_dir / f"{metric}ham2pose_pose-eval_and_orig_results_compared.csv"
-                merged[[f"{metric}_old", f"{metric}_new", "ref", "hyp", "signature"]].to_csv(output_path, index=False)
+                merged[[f"{metric}_old", f"{metric}_new", "ref", "hyp", f"{metric}_signature"]].to_csv(
+                    output_path, index=False
+                )
                 print(f"Saved to {output_path}")
             else:
                 print("  No valid (non-NaN) comparisons for this metric.")
