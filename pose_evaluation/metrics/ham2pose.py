@@ -91,7 +91,10 @@ class Ham2PosenMSEDistanceMeasure(AggregatedDistanceMeasure):
             dist = self._mse_trajectory_distance(hyp_trajectory, ref_trajectory)
             trajectory_distances[i] = dist
         trajectory_distances = ma.array(trajectory_distances)
-        return self._aggregate(trajectory_distances)
+        dist = self._aggregate(trajectory_distances)
+        if np.isnan(dist):
+            dist = self.default_distance
+        return dist
 
 
 class Ham2PosenMSEMetric(DistanceMetric):
@@ -127,11 +130,8 @@ class Ham2PoseAPEDistanceMeasure(AggregatedDistanceMeasure):
             aggregation_strategy="mean",
         )
 
-    def _APE_trajectory_distance(self, trajectory1, trajectory2):
-        """
-        Copied from Ham2Pose
-
-        """
+    def _ape_trajectory_distance(self, trajectory1, trajectory2):
+        """Copied from Ham2Pose's 'APE' function."""
         if len(trajectory1) < len(trajectory2):
             diff = len(trajectory2) - len(trajectory1)
             trajectory1 = np.concatenate((trajectory1, np.zeros((diff, 3))))
@@ -162,10 +162,13 @@ class Ham2PoseAPEDistanceMeasure(AggregatedDistanceMeasure):
             total=keypoint_count,
             disable=not progress,
         ):
-            dist = self._APE_trajectory_distance(hyp_trajectory, ref_trajectory)
+            dist = self._ape_trajectory_distance(hyp_trajectory, ref_trajectory)
             trajectory_distances[i] = dist
         trajectory_distances = ma.array(trajectory_distances)
-        return self._aggregate(trajectory_distances)
+        dist = self._aggregate(trajectory_distances)
+        if np.isnan(dist):
+            dist = self.default_distance
+        return dist
 
 
 class Ham2PosenAPEMetric(DistanceMetric):
@@ -212,14 +215,21 @@ class Ham2PoseUnmaskedEuclideanDTWDistanceMeasure(DTWAggregatedDistanceMeasure):
     """
     using unmasked_euclidean function, replicates fastdtw from ham2pose
     Ham2Pose does dist = fastdtw(pose1_keypoint_trajectory, pose2_keypoint_trajectory, dist=masked_euclidean)[0] for each keypoint trajectory
-    DTWAggregatedDistanceMeasure calls
+    DTWAggregatedDistanceMeasure's get_distance calls
     distance, _ = fastdtw(hyp_trajectory, ref_trajectory, dist=self._calculate_pointwise_distances)
     for each trajectory
     And then finds the mean with self._aggregate(trajectory_distances), mean by default
 
-    So we only need to override _calculate_pointwise_distances in theory, but I'm not getting expected results
-
+    So we only need to override _calculate_pointwise_distances in theory,
+    but I'm not getting expected results, so we copy the compare_poses code
     """
+
+    def __init__(self):
+        super().__init__(
+            name="Ham2Pose_UnmaskedEuclideanDTWDistanceMeasure",
+            default_distance=0.0,
+            aggregation_strategy="mean",
+        )
 
     def get_distance(self, hyp_data: ma.MaskedArray, ref_data: ma.MaskedArray, progress=False) -> float:
         idx2weight = dict.fromkeys(range(hyp_data.shape[2]), 1)
@@ -229,10 +239,17 @@ class Ham2PoseUnmaskedEuclideanDTWDistanceMeasure(DTWAggregatedDistanceMeasure):
             pose2_keypoint_trajectory = ref_data[:, :, keypoint_idx, :].squeeze(1)
             # print(f"Trajectory shape: {pose1_keypoint_trajectory.shape}")
             # print(f"Sample values: {pose1_keypoint_trajectory[:2]} vs {pose2_keypoint_trajectory[:2]}")
+            try:
+                traj_dist = fastdtw(pose1_keypoint_trajectory, pose2_keypoint_trajectory, dist=unmasked_euclidean)[0]
+            except ValueError:
+                # one of the trajectories contains nan: give up and return default distance for the pose pair
+                return self.default_distance
+            total_distance += traj_dist * weight
+        dist = total_distance / len(idx2weight)
 
-            dist = fastdtw(pose1_keypoint_trajectory, pose2_keypoint_trajectory, dist=unmasked_euclidean)[0]
-            total_distance += dist * weight
-        return total_distance / len(idx2weight)
+        if np.isnan(dist):
+            dist = self.default_distance
+        return dist
 
 
 class Ham2PoseDTWMetric(DistanceMetric):
@@ -272,15 +289,29 @@ class Ham2PoseMaskedEuclideanDTWDistanceMeasure(DTWAggregatedDistanceMeasure):
     That's the only difference.
     """
 
+    def __init__(self):
+        super().__init__(
+            name="Ham2Pose_MaskedEuclideanDTWDistanceMeasure",
+            default_distance=0.0,
+            aggregation_strategy="mean",
+        )
+
     def get_distance(self, hyp_data: ma.MaskedArray, ref_data: ma.MaskedArray, progress=False) -> float:
         idx2weight = dict.fromkeys(range(hyp_data.shape[2]), 1)
         total_distance = 0
         for keypoint_idx, weight in idx2weight.items():
             pose1_keypoint_trajectory = hyp_data[:, :, keypoint_idx, :].squeeze(1)
             pose2_keypoint_trajectory = ref_data[:, :, keypoint_idx, :].squeeze(1)
-            dist = fastdtw(pose1_keypoint_trajectory, pose2_keypoint_trajectory, dist=masked_euclidean)[0]
+            try:
+                dist = fastdtw(pose1_keypoint_trajectory, pose2_keypoint_trajectory, dist=masked_euclidean)[0]
+            except ValueError:
+                # one of the trajectories contains nan
+                return self.default_distance
             total_distance += dist * weight
-        return total_distance / len(idx2weight)
+        dist = total_distance / len(idx2weight)
+        if np.isnan(dist):
+            dist = self.default_distance
+        return dist
 
 
 class Ham2PosenDTWMetric(DistanceMetric):

@@ -88,6 +88,7 @@ if __name__ == "__main__":
                 try:
                     score = distance_fn.score_with_signature(pose_hyp, pose_ref)
                     entry[name] = score.score
+                    entry[f"{name}_score_type"] = type(score.score)
                     entry[f"{name}_signature"] = distance_fn.get_signature().format()
                 except ValueError as e:
                     entry[f"{name}_ERROR"] = str(e)
