@@ -1,3 +1,5 @@
+"""Interactively look at vocabulary matches across datasets"""
+
 import random
 import re
 from io import StringIO
@@ -135,15 +137,17 @@ def merge_and_find_unmatched(
 def build_supervenn_sets(df_dict):
     sets = {}
     for name, df in df_dict.items():
-        columns = df.columns.tolist()
-        col = st.selectbox(
-            f"What Column to use for {name}?",
-            options=columns,
-            index=columns.index("EntryID") if "EntryID" in columns else 0,
-        )
-        # glosses = set(df["GLOSS_A"].unique()).union(df["GLOSS_B"].unique())
-        glosses = set(df[col])
-        sets[name] = glosses
+        if st.checkbox(f"Add {name} to supervenn?", value=True):
+            columns = df.columns.tolist()
+            col = st.selectbox(
+                f"What Column to use for {name}?",
+                options=columns,
+                index=columns.index("EntryID") if "EntryID" in columns else 0,
+            )
+            display_name = st.text_input("What name should it have in the plot?", value=name)
+            # glosses = set(df["GLOSS_A"].unique()).union(df["GLOSS_B"].unique())
+            glosses = set(df[col])
+            sets[display_name] = glosses
     return sets
 
 
@@ -436,14 +440,14 @@ if show_supervenn:
     sets = []
     labels = []
     for name, df_set in df_sets.items():
-        # st.write(name)
         labels.append(name)
         sets.append(df_set)
+        # st.write(name)
         # st.write(len(df_set))
     fig, ax = plt.subplots(figsize=(12, 6))
     # plt.title(f"Overlap of {labels}", fontsize=16, fontweight="bold")
 
-    supervenn(sets, labels, ax=ax)
+    supervenn(sets, labels, ax=ax, widths_minmax_ratio=0.05)
     st.write("Plotting Supervenn...")
     # st.write(fig)
     st.pyplot(fig)
