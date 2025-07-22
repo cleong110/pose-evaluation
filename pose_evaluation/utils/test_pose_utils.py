@@ -11,6 +11,7 @@ from pose_evaluation.utils.pose_utils import (
     first_frame_pad_shorter_poses,
     get_component_names_and_points_dict,
     get_face_and_hands_from_pose,
+    get_fingertip_keypoints,
     get_youtube_asl_mediapipe_keypoints,
     load_pose_file,
     pose_fill_masked_or_invalid,
@@ -424,3 +425,10 @@ def test_pose_slice_frames(mediapipe_poses_test_data: list["Pose"]):
 
     # Check that header was preserved
     assert sliced.header == pose.header
+
+
+def test_get_fingertips(mediapipe_poses_test_data: list["Pose"]):
+    for pose in mediapipe_poses_test_data:
+        new_pose = get_fingertip_keypoints(pose)
+        # frames, person, keypoints, xyz
+        assert new_pose.body.data.shape[2] == 10, f"There should be 10 fingerpoints. Got {new_pose.body.data.shape}"

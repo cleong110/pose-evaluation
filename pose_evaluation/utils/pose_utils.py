@@ -140,7 +140,7 @@ def first_frame_pad_shorter_poses(poses: Iterable[Pose]) -> list[Pose]:
     return poses
 
 
-def get_youtube_asl_mediapipe_keypoints(pose: Pose):
+def get_youtube_asl_mediapipe_keypoints(pose: Pose) -> Pose:
     if detect_known_pose_format(pose) != "holistic":
         return pose
 
@@ -209,6 +209,22 @@ def get_youtube_asl_mediapipe_keypoints(pose: Pose):
     return pose
 
 
+def get_fingertip_keypoints(pose: Pose) -> Pose:
+    pose = pose.copy()
+    if detect_known_pose_format(pose) != "holistic":
+        return pose
+    chosen_component_names = ["LEFT_HAND_LANDMARKS", "RIGHT_HAND_LANDMARKS"]
+    points_dict = defaultdict(list)
+
+    for component in pose.header.components:
+        if component.name in chosen_component_names:
+            for point in component.points:
+                if "_TIP" in point:
+                    points_dict[component.name].append(point)
+    pose = pose.get_components(components=chosen_component_names, points=points_dict)
+    return pose
+
+
 def pose_hide_low_conf(pose: Pose, confidence_threshold: float = 0.2) -> None:
     mask = pose.body.confidence <= confidence_threshold
     pose.body.confidence[mask] = 0
@@ -259,7 +275,7 @@ def add_z_offsets_to_pose(pose: Pose, speed: float = 1.0) -> Pose:
     return pose
 
 
-def pose_slice_frames(pose: Pose, start_index: int, end_index: int) -> Pose:
+def pose_slice_frames(pose: Pose | Path, start_index: int, end_index: int) -> Pose:
     """
     Return a new Pose object with body frames sliced from start_index to end_index.
 

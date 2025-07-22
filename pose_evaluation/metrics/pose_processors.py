@@ -10,6 +10,7 @@ from pose_evaluation.metrics.base import Signature
 from pose_evaluation.utils.pose_utils import (
     add_z_offsets_to_pose,
     first_frame_pad_shorter_poses,
+    get_fingertip_keypoints,
     get_youtube_asl_mediapipe_keypoints,
     pose_fill_masked_or_invalid,
     pose_hide_low_conf,
@@ -181,6 +182,14 @@ class GetHandsOnlyHolisticPoseProcessor(PoseProcessor):
 
     def process_pose(self, pose: Pose) -> Pose:
         return pose.get_components(["LEFT_HAND_LANDMARKS", "RIGHT_HAND_LANDMARKS"])
+
+
+class GetFingertipsOnlyHolisticPoseProcessor(PoseProcessor):
+    def __init__(self) -> None:
+        super().__init__(name="get_fingertips_only")
+
+    def process_pose(self, pose: Pose) -> Pose:
+        return get_fingertip_keypoints(pose)
 
 
 class InterpolateAllToSetFPSPoseProcessor(PoseProcessor):
