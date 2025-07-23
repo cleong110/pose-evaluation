@@ -33,6 +33,7 @@ from pose_evaluation.metrics.pose_processors import (
     AddTOffsetsToZPoseProcessor,
     FillMaskedOrInvalidValuesPoseProcessor,
     FirstFramePadShorterPosesProcessor,
+    GetFingertipsOnlyHolisticPoseProcessor,
     GetHandsOnlyHolisticPoseProcessor,
     GetYoutubeASLKeypointsPoseProcessor,
     HideLegsPosesProcessor,
@@ -136,6 +137,8 @@ def construct_metric(
         pose_preprocessors.append(ReduceHolisticPoseProcessor())
     elif keypoint_selection == "youtubeaslkeypoints":
         pose_preprocessors.append(GetYoutubeASLKeypointsPoseProcessor())
+    elif keypoint_selection == "fingertips":
+        pose_preprocessors.append(GetFingertipsOnlyHolisticPoseProcessor())
     else:
         pose_preprocessors.append(RemoveWorldLandmarksProcessor())
         pose_preprocessors.append(HideLegsPosesProcessor())

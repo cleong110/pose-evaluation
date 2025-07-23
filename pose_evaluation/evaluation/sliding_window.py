@@ -16,6 +16,7 @@ from pose_evaluation.evaluation.create_metrics import (
     construct_metric,
 )
 from pose_evaluation.evaluation.dataset_parsing.dataset_utils import DatasetDFCol
+from pose_evaluation.evaluation.dataset_parsing.gloss_utils import text_to_glosses
 from pose_evaluation.evaluation.load_splits_and_run_metrics import combine_dataset_dfs
 from pose_evaluation.metrics.distance_metric import DistanceMetric
 from pose_evaluation.metrics.dtw_metric import DTWDTAIImplementationDistanceMeasure
@@ -109,6 +110,68 @@ def get_query_poses(
         yield gloss, Pose.read(Path(pose_path).read_bytes()), Path(pose_path)
 
 
+def search_with_gloss_list(
+    ref_pose_path: Path,
+    dataset_df: Path,
+    query_glosses: list[str],
+    query_sample_count: int,
+    metric: DistanceMetric,
+    stride: int,
+    start_frame: int,
+    end_frame: int | None,
+) -> pd.DataFrame:
+    log.info(f"Reference Pose: {ref_pose_path}")
+    log.info(f"Dataset df: {dataset_df}")
+    log.info(f"Query Glosses: {query_glosses}")
+    log.info(f"Query Count per Gloss: {query_sample_count}")
+    log.info(f"Metric: {metric.name}")
+    log.info(f"Stride: {stride}")
+    log.info(f"Start Frame: {start_frame}")
+    log.info(f"End Frame: {end_frame}")
+
+    log.info(dataset_df.head())
+
+    with timed_section("Query Pose Loading"):
+        glosses_and_poses = list(get_query_poses(dataset_df, query_glosses, query_sample_count))
+    log.info(f"Loaded {len(glosses_and_poses)} query poses.")
+
+    for i, (gloss, pose, pose_path) in enumerate(glosses_and_poses):
+        log.info(f"{gloss} pose {i}, {pose.body.data.shape}, {pose_path.name}")
+
+    with timed_section("Reference Pose Loading"):
+        ref_pose = Pose.read(ref_pose_path.read_bytes())
+    log.info(f"Loaded ref pose: {ref_pose.body.data.shape}")
+
+    log.info("---- Windowing Strategy: Fixed Window, Mean Query Length * 1.2")
+    query_window_length = np.mean([q.body.data.shape[0] for g, q, p in glosses_and_poses])
+    query_window_length = int(query_window_length * 1.2)
+    log.info(f"Calculated Window Length: {query_window_length}")
+    query_stride = query_window_length // 3
+    log.info(f"Stride (auto-calculated): {query_stride}")
+
+    all_scores = []
+
+    with timed_section("Sliding Window Scoring"):
+        for query_gloss, query_pose, query_pose_path in tqdm(glosses_and_poses, desc="Processing Queries"):
+            scores_df = score_windows(
+                query_pose=query_pose,
+                target_pose=ref_pose,
+                window_length=query_window_length,
+                stride=query_stride,
+                start=start_frame,
+                end=end_frame or ref_pose.body.data.shape[0],
+                metric=metric,
+            )
+            scores_df["Query"] = query_pose_path.name
+            scores_df["GLOSS"] = query_gloss
+            all_scores.append(scores_df)
+
+    combined_scores = pd.concat(all_scores, ignore_index=True)
+    log.info(f"Combined dataframe shape: {combined_scores.shape}")
+
+    return combined_scores
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Slide a query pose across a reference pose and compute similarity scores."
@@ -126,8 +189,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--query-glosses",
         type=str,
-        required=True,
-        help="Comma-separated list of glosses to spot for, e.g., --query-glosses 'APPLE,BOOK'.",
+        # required=True,
+        help="Comma-separated list of glosses to spot for, e.g., --query-glosses 'APPLE,BOOK'. Either this or --query-text is required.",
+    )
+    parser.add_argument(
+        "--query-text",
+        type=str,
+        # required=True,
+        help="Text to search for. From this a set of query glosses will be generated. Either this or --query-glosses is required.",
     )
 
     parser.add_argument(
@@ -145,15 +214,24 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--stride", type=int, default=100, help="Stride for sliding window (default: %(default)s frames)."
+        "--stride",
+        type=int,
+        default=100,
+        help="Stride for sliding window (default: %(default)s frames).",
     )
 
     parser.add_argument(
-        "--start", type=int, default=0, help="Start frame index in the reference pose (default: %(default)s)."
+        "--start",
+        type=int,
+        default=0,
+        help="Start frame index in the reference pose (default: %(default)s).",
     )
 
     parser.add_argument(
-        "--end", type=int, default=None, help="End frame index in the reference pose (default: till end of pose)."
+        "--end",
+        type=int,
+        default=None,
+        help="End frame index in the reference pose (default: till end of pose).",
     )
     parser.add_argument(
         "--output-dir",
@@ -166,78 +244,57 @@ if __name__ == "__main__":
 
     args.output_dir.mkdir(exist_ok=True, parents=True)
 
-    query_glosses = [g.strip() for g in args.query_glosses.split(",")]
+    with timed_section("Dataset Loading"):
+        dataset_df = combine_dataset_dfs(dataset_df_files=[args.dataset_csv], splits=["test"])
 
-    log.info(f"Reference Pose: {args.ref_pose}")
-    log.info(f"Dataset CSV: {args.dataset_csv}")
-    log.info(f"Query Glosses: {query_glosses}")
-    log.info(f"Query Count per Gloss: {args.query_sample_count}")
-    log.info(f"Metric: {args.metric_name}")
-    log.info(f"Stride: {args.stride}")
-    log.info(f"Start Frame: {args.start}")
-    log.info(f"End Frame: {args.end}")
+    query_glosses = []
+    if args.query_glosses is not None:
+        for g in args.query_glosses.split(","):
+            query_glosses.append(g.strip())
 
-    dataset_df = combine_dataset_dfs(dataset_df_files=[args.dataset_csv], splits=["test"])
-    log.info(f"{dataset_df.head()}")
+    if args.query_text is not None:
+        vocab = dataset_df["GLOSS"].unique().tolist()
+        query_glosses = text_to_glosses(args.query_text, vocab)
+        print(f"Parsed Glosses {query_glosses} from query text")
 
-    # Load query poses
-    log.info("Loading query poses")
-    glosses_and_poses = list(get_query_poses(dataset_df, query_glosses, args.query_sample_count))
-    for i, gloss_pose in enumerate(glosses_and_poses):
-        gloss, pose, pose_path = gloss_pose
-        log.info(f"{gloss} #{i} pose {i}, {pose.body.data.shape}, {pose_path.name}")
+    keypoint_selections = [
+        "removelegsandworld",
+        "reduceholistic",
+        "hands",
+        "youtubeaslkeypoints",
+        "fingertips",
+    ]
 
-    # los reference pose
-    ref_pose = Pose.read(args.ref_pose.read_bytes())
-    log.info(f"Loaded ref pose: {ref_pose.body.data.shape}")
-
-    # construct the Metric
-    metric = construct_metric(
-        distance_measure=DTWDTAIImplementationDistanceMeasure(
-            name="dtaiDTWAggregatedDistanceMeasureFast", use_fast=True
-        ),
-        z_speed=None,
-        default_distance=10.0,
-        trim_meaningless_frames=False,
-        normalize=True,
-        sequence_alignment="dtw",
-        # keypoint_selection="hands",
-        keypoint_selection="fingertips",
-        fps=None,
-        masked_fill_value=0.0,
-    )
-
+    with timed_section("Metric Construction"):
+        metric = construct_metric(
+            distance_measure=DTWDTAIImplementationDistanceMeasure(
+                name="dtaiDTWAggregatedDistanceMeasureFast", use_fast=True
+            ),
+            z_speed=None,
+            default_distance=10.0,
+            trim_meaningless_frames=False,
+            normalize=True,
+            sequence_alignment="dtw",
+            keypoint_selection="fingertips",
+            fps=None,
+            masked_fill_value=0.0,
+        )
     log.info(f"Constructed metric: {metric.name}")
 
-    log.info("---- Windowing Strategy: Fixed Window, Mean Query Length * 1.2")
-    query_window_length = np.mean([q.body.data.shape[0] for g, q, p in glosses_and_poses])
-    query_window_length = int(query_window_length * 1.2)
-    log.info(f"Calculated Window Length: {query_window_length}")
-    query_stride = query_window_length // 3
-    log.info(f"Stride: {query_stride}")
-    all_scores = []
-
-    for i, (query_gloss, query_pose, query_pose_path) in enumerate(tqdm(glosses_and_poses, desc="Processing Queries")):
-        scores_df = score_windows(
-            query_pose=query_pose,
-            target_pose=ref_pose,
-            window_length=query_window_length,
-            stride=query_stride,
-            start=0,
-            end=ref_pose.body.data.shape[0],
-            metric=metric,
-        )
-        log.debug(f"Query {i}: {query_pose}")
-        scores_df["Query"] = query_pose_path.name
-        scores_df["GLOSS"] = query_gloss
-        # scores_df["PATH"] = query_pose_path
-        all_scores.append(scores_df)
-
-    combined_scores = pd.concat(all_scores, ignore_index=True)
-    log.info(combined_scores)
+    scores_df = search_with_gloss_list(
+        ref_pose_path=args.ref_pose,
+        dataset_df=dataset_df,
+        query_glosses=query_glosses,
+        query_sample_count=args.query_sample_count,
+        metric=metric,
+        stride=args.stride,
+        start_frame=args.start,
+        end_frame=args.end,
+    )
+    log.info(scores_df)
 
     fig = px.line(
-        combined_scores,
+        scores_df,
         x="Time (s)",
         y="score",
         color="GLOSS",  # Color by GLOSS
@@ -267,7 +324,7 @@ if __name__ == "__main__":
     )
     # fig.show()
     # Save plot to HTML for interactive viewing later
-    out_dir = args.output_dir / f"{metric.name}"
+    out_dir = args.output_dir / f"{metric.name}" / "_".join(query_glosses)
     out_dir.mkdir(exist_ok=True, parents=True)
     html_out = out_dir / "distance_scores_plot.html"
     fig.write_html(html_out)
