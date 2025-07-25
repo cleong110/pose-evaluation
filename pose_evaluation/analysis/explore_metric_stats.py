@@ -28,6 +28,7 @@ torch.classes.__path__ = [os.path.join(torch.__path__[0], torch.classes.__file__
 
 METRIC_COL = "METRIC"
 SIGNATURE_COL = "SIGNATURE"
+
 SHORT_COL = "SHORT"
 DESCRIPTIVE_NAME_COL = "DESCRIPTIVE_NAME"
 
@@ -493,7 +494,15 @@ csv_paths_default = [
     # "/opt/home/cleong/projects/pose-evaluation/metric_results_round_4_pruned_to_match_embeddings/5_21_score_analysis_1206metrics_169glosses/stats_by_metric.csv",
     str(
         Path(__file__).parent.resolve().parent.parent
-        / "metric_results_round_4_pruned_to_match_embeddings/2025-06-16_3368_metrics_169_glosses_comparable_score_analysis/stats_by_metric.csv"
+        / "metric_results_round_4_pruned_to_match_embeddings"
+        / "2025-06-23_4328_metrics_169_glosses_comparable_score_analysis"
+        / "stats_by_metric.csv"
+    ),
+    str(
+        Path(__file__).parent.resolve().parent.parent
+        / "metric_results_round_4_pruned_to_match_embeddings"
+        / "score_analysis_ham2pose3metrics"
+        / "stats_by_metric.csv"
     ),
 ]
 csv_paths_input = st.text_input(
