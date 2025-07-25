@@ -1,15 +1,13 @@
 """Given two poses, one longer, slide the smaller across the larger"""
 
-import argparse
-import itertools
 import logging
 import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from collections.abc import Sequence
 from contextlib import contextmanager
-from pathlib import Path
 
-from pose_evaluation.metrics.pose_processors import TrimMeaninglessFramesPoseProcessor
+from pose_evaluation.evaluation.score_dataframe_format import ScoreDFCol
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -27,24 +25,19 @@ def timed_section(name: str):
 
 
 with timed_section("2-party imports"):
-    import numpy as np
     import pandas as pd
-    import plotly.express as px
     from pose_format import Pose
     from tqdm import tqdm
 
 with timed_section("import construct metric"):
-    from pose_evaluation.evaluation.create_metric import (
-        construct_metric,
-    )
+    pass
 
 with timed_section("import dataset utils"):
-    from pose_evaluation.evaluation.dataset_parsing.dataset_utils import DatasetDFCol
+    pass
 with timed_section("import dataset_dfs code"):
-    from pose_evaluation.evaluation.load_splits_and_run_metrics import combine_dataset_dfs
+    pass
 with timed_section("import stuff"):
     from pose_evaluation.metrics.distance_metric import DistanceMetric
-    from pose_evaluation.metrics.dtw_metric import DTWDTAIImplementationDistanceMeasure
 with timed_section("import pose utils"):
     from pose_evaluation.utils.pose_utils import pose_slice_frames
 
@@ -104,26 +97,30 @@ def get_sliding_window_frame_ranges(
     return ranges
 
 
-def score_windows(
-    query_pose: Pose,
-    target_pose: Pose,
-    stride: int,
-    start: int,
-    end: int,
-    window_length: int,
+def score_windows_from_ranges(
+    query_pose: "Pose",
+    target_pose: "Pose",
+    windows: Sequence[tuple[int, int]],
     metric: "DistanceMetric",
-    trim=True,
 ) -> pd.DataFrame:
-    frame_ranges = get_sliding_window_frame_ranges(
-        total_frames=len(target_pose.body.data),
-        window_length=window_length,
-        stride=stride,
-        start=start,
-        end=end,
-    )
+    """
+    Scores a sequence of (start_frame, end_frame) windows between a query pose and
+    slices of a target pose using the provided distance metric.
 
+    Args:
+        query_pose (Pose): The pose sequence to compare against.
+        target_pose (Pose): The full target pose sequence to slice from.
+        windows (Sequence[tuple[int, int]]): List of (start_frame, end_frame) tuples.
+        metric (DistanceMetric): Scoring metric to apply.
+
+    Returns:
+        pd.DataFrame: DataFrame with columns:
+            ['start_frame', 'end_frame', 'Time (s)', 'SCORE', 'TIME', 'SIGNATURE']
+
+    """
     score_results = defaultdict(list)
-    for start_idx, end_idx in tqdm(frame_ranges, desc="Scoring windows"):
+
+    for start_idx, end_idx in tqdm(windows, desc="Scoring windows"):
         window_pose = pose_slice_frames(target_pose, start_idx, end_idx)
 
         score_start = time.perf_counter()
@@ -132,15 +129,15 @@ def score_windows(
 
         seconds = start_idx / target_pose.body.fps
 
-        score_results["start_frame"].append(start_idx)  # inclusive
-        score_results["end_frame"].append(end_idx)  # exclusive
+        score_results["start_frame"].append(start_idx)
+        score_results["end_frame"].append(end_idx)
         score_results["Time (s)"].append(seconds)
-        score_results["score"].append(score.score)
-        score_results["scoring_duration_sec"].append(scoring_duration)
-        score_results["signature"].append(metric.get_signature().format())
+        score_results[ScoreDFCol.SCORE].append(score.score)
+        score_results[ScoreDFCol.TIME].append(scoring_duration)
+        score_results[ScoreDFCol.SIGNATURE].append(metric.get_signature().format())
 
     scores_df = pd.DataFrame(score_results)
-    scores_df["signature"] = scores_df["signature"].astype("category")
+    scores_df[ScoreDFCol.SIGNATURE] = scores_df[ScoreDFCol.SIGNATURE].astype("category")
     return scores_df
 
 
@@ -160,7 +157,7 @@ class SlidingWindowStrategy(ABC):
         pass
 
 
-class FixedWindowsSetByQueryMeanLengths(SlidingWindowStrategy):
+class FixedWindowsSetByQueryMeanLengthsStrategy(SlidingWindowStrategy):
     def __init__(
         self,
         mean_query_pose_length: int,
@@ -169,8 +166,10 @@ class FixedWindowsSetByQueryMeanLengths(SlidingWindowStrategy):
     ):
         """Set window length and stride based on mean query length and heuristics"""
         window_length = int(mean_query_pose_length * window_length_multiplier)
+        if stride_divisor is None:
+            stride_divisor = window_length  # aka, stride 1
 
-        if stride_divisor is None or stride_divisor <= 0:
+        if stride_divisor <= 0:
             raise ValueError("stride_divisor must be a positive integer")
 
         stride = max(1, window_length // stride_divisor)
@@ -178,10 +177,7 @@ class FixedWindowsSetByQueryMeanLengths(SlidingWindowStrategy):
         self.window_length = window_length
         self.stride = stride
 
-        strategy_name = (
-            f"FixedWindow(len={self.window_length}) from MeanQueryLength({mean_query_pose_length}x{window_length_multiplier}, "
-            f"stride=win//{stride_divisor}={self.stride})"
-        )
+        strategy_name = f"FixedWindowFromMeanQueryLength(len={self.window_length})_mult{window_length_multiplier}_stridedivisor{stride_divisor}={self.stride})"
 
         super().__init__(name=strategy_name)
 
@@ -195,280 +191,31 @@ class FixedWindowsSetByQueryMeanLengths(SlidingWindowStrategy):
         )
 
 
-def get_query_poses(
-    dataset_df,
-    query_glosses,
-    sample_count_per_gloss: int = 5,
-    trim=True,
-):
-    gloss_df = dataset_df[dataset_df[DatasetDFCol.GLOSS].isin(query_glosses)].copy()
+class FixedWindowStrategy(SlidingWindowStrategy):
+    def __init__(self, window_length: int, stride: int):
+        """
+        Sliding window strategy that uses fixed window length and stride.
 
-    # Group by gloss and sample
-    sampled_df = gloss_df.groupby(DatasetDFCol.GLOSS, group_keys=False).apply(
-        lambda x: x.sample(min(len(x), sample_count_per_gloss), random_state=42)
-    )
+        Parameters
+        ----------
+            window_length (int): Number of frames in each window. Must be > 0.
+            stride (int): Number of frames to move forward between windows. Must be > 0.
 
-    processors = []
-    if trim:
-        # isolated signs often have dead time around the actual signing
-        processors.append(TrimMeaninglessFramesPoseProcessor())
+        """
+        if window_length <= 0 or stride <= 0:
+            raise ValueError("Both window_length and stride must be positive integers.")
 
-    for row in sampled_df[[DatasetDFCol.GLOSS, DatasetDFCol.POSE_FILE_PATH]].itertuples(index=False, name=None):
-        gloss, pose_path = row
-        log.info(f"{gloss}, {pose_path}")
-        pose = Pose.read(Path(pose_path).read_bytes())
-        for processor in processors:
-            pose = processor.process_pose(pose)
+        self.window_length = window_length
+        self.stride = stride
 
-        yield gloss, pose, Path(pose_path)
+        name = f"FixedWindow(len={self.window_length}, stride={self.stride})"
+        super().__init__(name=name)
 
-
-def search_with_gloss_list(
-    ref_pose_path: Path,
-    dataset_df: Path,
-    query_glosses: list[str],
-    query_sample_count: int,
-    keypoint_selection: str,
-    masked_fill_value: float,
-    stride: int,
-    start_frame: int,
-    end_frame: int | None,
-    out_dir: Path,
-) -> pd.DataFrame:
-    with timed_section("Metric Construction"):
-        metric = construct_metric(
-            distance_measure=DTWDTAIImplementationDistanceMeasure(
-                name="dtaiDTWAggregatedDistanceMeasureFast", use_fast=True
-            ),
-            z_speed=None,
-            default_distance=10.0,
-            trim_meaningless_frames=False,
-            normalize=True,
-            sequence_alignment="dtw",
-            keypoint_selection=keypoint_selection,
-            fps=None,
-            masked_fill_value=masked_fill_value,
-        )
-        log.info(f"Constructed metric: {metric.name}")
-
-    log.info(f"Reference Pose: {ref_pose_path}")
-    log.info(f"Dataset df: {dataset_df}")
-    log.info(f"Query Glosses: {query_glosses}")
-    log.info(f"Query Count per Gloss: {query_sample_count}")
-    log.info(f"Metric: {metric.name}")
-    log.info(f"Stride: {stride}")
-    log.info(f"Start Frame in long video: {start_frame}")
-    log.info(f"End Frame in long video: {end_frame}")
-    if end_frame is not None:
-        log.info(f"Segment in long video: {end_frame - start_frame}")
-
-    log.info(dataset_df.head())
-
-    with timed_section("Query Pose Loading"):
-        glosses_and_poses = list(get_query_poses(dataset_df, query_glosses, query_sample_count))
-    log.info(f"Loaded {len(glosses_and_poses)} query poses.")
-
-    for i, (gloss, pose, pose_path) in enumerate(glosses_and_poses):
-        log.info(f"{gloss} pose {i}, {pose.body.data.shape}, {pose_path.name}")
-
-    with timed_section("Reference Pose Loading"):
-        ref_pose = Pose.read(ref_pose_path.read_bytes())
-    log.info(f"Loaded ref pose: {ref_pose.body.data.shape}.")
-
-    window_strategy = "Fixed Window Set By Mean Query Lengths"
-    query_window_length = np.mean([q.body.data.shape[0] for g, q, p in glosses_and_poses])
-    window_length_multiplier = 1.2
-    query_window_length = int(query_window_length * window_length_multiplier)
-    log.info(f"Calculated Window Length: {query_window_length}")
-    # query_stride_divisor = query_window_length
-    query_stride_divisor = query_window_length // 3
-    query_stride = query_window_length // query_stride_divisor
-    log.info(
-        "".join(
-            [
-                f"---- Windowing Strategy: {window_strategy},",
-                f"\n*\tWidth: Mean Query Length * {window_length_multiplier}={query_window_length}",
-                f"\n*\tStride (query_window_length // {query_stride_divisor})={query_stride}",
-            ]
-        )
-    )
-    log.info("")
-
-    all_scores = []
-
-    with timed_section("Sliding Window Scoring"):
-        for query_gloss, query_pose, query_pose_path in tqdm(glosses_and_poses, desc="Processing Queries"):
-            scores_df = score_windows(
-                query_pose=query_pose,
-                target_pose=ref_pose,
-                window_length=query_window_length,
-                stride=query_stride,
-                start=start_frame,
-                end=end_frame or ref_pose.body.data.shape[0],
-                metric=metric,
-            )
-            scores_df["Query"] = query_pose_path.name
-            scores_df["GLOSS"] = query_gloss
-            all_scores.append(scores_df)
-
-    combined_scores = pd.concat(all_scores, ignore_index=True)
-    log.info(f"Combined dataframe shape: {combined_scores.shape}")
-
-    scores_df = combined_scores
-    log.info(scores_df)
-
-    fig = px.line(
-        scores_df,
-        x="Time (s)",
-        y="score",
-        color="GLOSS",  # Color by GLOSS
-        line_group="Query",  # Individual line per Query exemplar
-        title=f"Gloss Distances (DTW+Norm+Masked Fill {masked_fill_value}), Window Strategy {window_strategy}",
-        hover_data={
-            "Time (s)": False,
-            "start_frame": True,
-            "end_frame": True,
-            "score": ":.4f",
-            "Query": True,
-            "GLOSS": True,
-        },
-    )
-    fig.update_layout(
-        xaxis_title="Time (m:s)",
-        xaxis_tickformat=".1f",  # Show ~1 decimal minute
-    )
-    fig.update_layout(
-        legend={
-            "orientation": "h",  # Optional: Make the legend horizontal
-            "yanchor": "top",  # Anchor the legend's top to the specified y-coordinate
-            "y": -0.3,  # Adjust this value to move the legend further down
-            "xanchor": "center",  # Anchor the legend's center to the specified x-coordinate
-            "x": 0.5,  # Center the legend horizontally
-        }
-    )
-
-    out_dir = (
-        args.output_dir
-        / "_".join(query_glosses)
-        / f"query_sample_count{query_sample_count}"
-        / "dtw"
-        / keypoint_selection
-        / f"maskedfill{masked_fill_value}"
-        / "windowstrat_querymeanlengthheuristic"
-        / f"windowmultiplier{window_length_multiplier}_stridedivisor{query_stride_divisor}"
-    )
-    out_dir.mkdir(exist_ok=True, parents=True)
-
-    # Save plot to HTML for interactive viewing later
-    html_out = out_dir / "distance_scores_plot.html"
-    fig.write_html(html_out)
-    logging.info(html_out.resolve())
-
-    # Optionally also save as static image (requires kaleido)
-    img_out = out_dir / "distance_scores_plot.png"
-    fig.write_image(img_out)
-    logging.info(img_out.resolve())
-
-    parquet_out = out_dir / "window_scores.parquet"
-    scores_df.to_parquet(parquet_out, index=False)
-    logging.info(parquet_out.resolve())
-
-    return combined_scores
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Slide a query pose across a reference pose and compute similarity scores."
-    )
-
-    parser.add_argument("ref_pose", type=Path, help="Path to the reference pose file to search within.")
-
-    parser.add_argument(
-        "--dataset-csv",
-        type=Path,
-        default=Path("/opt/home/cleong/projects/pose-evaluation/dataset_dfs/asl-citizen.csv"),
-        help="Path to the dataset CSV file (default: %(default)s).",
-    )
-
-    parser.add_argument(
-        "--query-glosses",
-        type=str,
-        # required=True,
-        help="Comma-separated list of glosses to spot for, e.g., --query-glosses 'APPLE,BOOK'. Either this or --query-text is required.",
-    )
-    # parser.add_argument(
-    #     "--query-text",
-    #     type=str,
-    #     # required=True,
-    #     help="Text to search for. From this a set of query glosses will be generated. Either this or --query-glosses is required.",
-    # )
-
-    parser.add_argument(
-        "--query-sample-count",
-        type=int,
-        default=5,
-        help="How many poses from the dataset to use as queries. Default: %(default)s.",
-    )
-
-    parser.add_argument(
-        "--stride",
-        type=int,
-        default=100,
-        help="Stride for sliding window (default: %(default)s frames).",
-    )
-
-    parser.add_argument(
-        "--start",
-        type=int,
-        default=0,
-        help="Start frame index in the reference pose (default: %(default)s).",
-    )
-
-    parser.add_argument(
-        "--end",
-        type=int,
-        default=None,
-        help="End frame index in the reference pose (default: till end of pose).",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path(".") / "sliding_window_outputs",
-        help="Where to save the output figures.",
-    )
-
-    args = parser.parse_args()
-
-    args.output_dir.mkdir(exist_ok=True, parents=True)
-
-    with timed_section("Dataset Loading"):
-        dataset_df = combine_dataset_dfs(dataset_df_files=[args.dataset_csv], splits=["test"])
-
-    query_glosses = []
-    if args.query_glosses is not None:
-        for g in args.query_glosses.split(","):
-            query_glosses.append(g.strip())
-
-    keypoint_selections = [
-        "removelegsandworld",
-        "reduceholistic",
-        "hands",
-        "youtubeaslkeypoints",
-        "fingertips",
-    ]
-
-    fillmask_vals = [0.0, 1.0, 10.0, 30.0]
-
-    for keypoint_selection, masked_fill_value in itertools.product(keypoint_selections, fillmask_vals):
-        scores_df = search_with_gloss_list(
-            ref_pose_path=args.ref_pose,
-            dataset_df=dataset_df,
-            query_glosses=query_glosses,
-            query_sample_count=args.query_sample_count,
-            keypoint_selection=keypoint_selection,
-            masked_fill_value=masked_fill_value,
-            stride=args.stride,
-            start_frame=args.start,
-            end_frame=args.end,
-            out_dir=args.output_dir,
+    def get_windows(self, pose: Pose, start_frame: int, end_frame: int) -> list[tuple[int, int]]:
+        return get_sliding_window_frame_ranges(
+            total_frames=len(pose.body.data),
+            window_length=self.window_length,
+            stride=self.stride,
+            start=start_frame,
+            end=end_frame,
         )

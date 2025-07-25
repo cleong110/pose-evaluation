@@ -11,8 +11,8 @@ import pandas as pd
 
 
 class ScoreDFCol:
-    GLOSS_A_PATH = "GLOSS_A_PATH"
-    GLOSS_B_PATH = "GLOSS_B_PATH"
+    GLOSS_A_PATH = "GLOSS_A_PATH" # query
+    GLOSS_B_PATH = "GLOSS_B_PATH" # ref
     GLOSS_A = "GLOSS_A"
     GLOSS_B = "GLOSS_B"
     SCORE = "SCORE"
