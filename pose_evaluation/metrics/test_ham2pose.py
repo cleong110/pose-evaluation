@@ -73,7 +73,7 @@ def legacy_mse(trajectory1, trajectory2):
     return sq_error.mean()
 
 
-def legacy_APE(trajectory1, trajectory2):
+def legacy_APE(trajectory1, trajectory2):  # noqa: N802
     if len(trajectory1) < len(trajectory2):
         diff = len(trajectory2) - len(trajectory1)
         trajectory1 = np.concatenate((trajectory1, np.zeros((diff, 3))))
@@ -100,7 +100,7 @@ def legacy_masked_mse(trajectory1, trajectory2, confidence):
     return (sq_error * confidence).mean()
 
 
-def legacy_masked_APE(trajectory1, trajectory2, confidence):
+def legacy_masked_APE(trajectory1, trajectory2, confidence):  # noqa: N802
     if len(trajectory1) < len(trajectory2):
         diff = len(trajectory2) - len(trajectory1)
         trajectory1 = np.concatenate((trajectory1, np.zeros((diff, 3))))

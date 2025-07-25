@@ -23,3 +23,7 @@ coverage.lcov
 *.tar.zst
 *.zip
 coverage.xml
+knn_metric_analysis/**
+files_to_check_for_ham2pose/**
+*.pose
+*.html
