@@ -17,6 +17,7 @@ from pose_evaluation.evaluation.load_splits_and_run_metrics import combine_datas
 from pose_evaluation.evaluation.score_dataframe_format import ScoreDFCol
 from pose_evaluation.evaluation.sliding_window import (
     FixedWindowsSetByQueryMeanLengthsStrategy,
+    FixedWindowStrategy,
     score_windows_from_ranges,
 )
 from pose_evaluation.metrics.dtw_metric import DTWDTAIImplementationDistanceMeasure
@@ -77,6 +78,7 @@ def search_with_gloss_list(
     end_frame: int | None,
     out_dir: Path,
     trim_queries: bool = True,
+    interpolate_ref: float | None = None,
 ) -> pd.DataFrame:
     with timed_section("Metric Construction"):
         metric = construct_metric(
@@ -85,7 +87,7 @@ def search_with_gloss_list(
             ),
             z_speed=None,
             default_distance=10.0,
-            trim_meaningless_frames=False,
+            trim_meaningless_frames=trim_queries,
             normalize=True,
             sequence_alignment="dtw",
             keypoint_selection=keypoint_selection,
@@ -118,15 +120,28 @@ def search_with_gloss_list(
         ref_pose = Pose.read(ref_pose_path.read_bytes())
     log.info(f"Loaded ref pose: {ref_pose.body.data.shape}.")
 
-    mean_query_length = np.mean([q.body.data.shape[0] for g, q, p in glosses_and_poses])
-    multipliers = [0.1, 0.2, 0.5]
-    stride_divisors = [None, 2]
+    window_strats = []
 
+    fixed_windows = [6, 24, 48]
+    # fixed_windows = [6, 8, 10, 12, 16, 20, 24]
+    # fixed_strides = [1, 2, 4, 6]
+    fixed_strides = [1, 6]
+
+    for fixed_window_length, fixed_stride in itertools.product(fixed_windows, fixed_strides):
+        window_strategy = FixedWindowStrategy(window_length=fixed_window_length, stride=fixed_stride)
+        window_strats.append(window_strategy)
+
+    # FixedWindowsSetByQueryMeanLengthsStrategy
+    mean_query_length = np.mean([q.body.data.shape[0] for g, q, p in glosses_and_poses])
+    multipliers = [0.1, 0.2, 0.5, 0.7]
+    stride_divisors = [None, 2]
     for stride_divisor, mult in itertools.product(stride_divisors, multipliers):
         window_strategy = FixedWindowsSetByQueryMeanLengthsStrategy(
             mean_query_pose_length=mean_query_length, window_length_multiplier=mult, stride_divisor=stride_divisor
         )
+        window_strats.append(window_strategy)
 
+    for window_strategy in window_strats:
         log.info(
             f"---- Windowing Strategy: {window_strategy.name}",
         )
@@ -188,6 +203,7 @@ def search_with_gloss_list(
         out_dir = (
             args.output_dir
             / "_".join(query_glosses)
+            / f"searchingfrom_frame{start_frame}_to_{end_frame}"
             / f"query_sample_count{query_sample_count}"
             / "dtw"
             / keypoint_selection
@@ -215,8 +231,18 @@ def search_with_gloss_list(
 
 
 if __name__ == "__main__":
+    # Full default lists
+    default_keypoint_selections = [
+        "removelegsandworld",
+        "reduceholistic",
+        "hands",
+        "youtubeaslkeypoints",
+        "fingertips",
+    ]
+    default_fillmask_vals = [0.0, 10.0, 100]
+
     parser = argparse.ArgumentParser(
-        description="Slide a query pose across a reference pose and compute similarity scores."
+        description="Slide query pose(s) across a reference pose and compute similarity scores."
     )
 
     parser.add_argument("ref_pose", type=Path, help="Path to the reference pose file to search within.")
@@ -225,13 +251,12 @@ if __name__ == "__main__":
         "--dataset-csv",
         type=Path,
         default=Path("/opt/home/cleong/projects/pose-evaluation/dataset_dfs/asl-citizen.csv"),
-        help="Path to the dataset CSV file (default: %(default)s).",
+        help="Path to the dataset CSV file (default: %(default)s), from which to take query glosses.",
     )
 
     parser.add_argument(
         "--query-glosses",
         type=str,
-        # required=True,
         help="Comma-separated list of glosses to spot for, e.g., --query-glosses 'APPLE,BOOK'. Either this or --query-text is required.",
     )
     parser.add_argument(
@@ -268,27 +293,41 @@ if __name__ == "__main__":
         help="Where to save the output figures.",
     )
 
-    args = parser.parse_args()
+    parser.add_argument(
+        "--keypoint-selections",
+        type=str,
+        default="all",
+        help=f"Comma-separated list of keypoint selections (default: all = {default_keypoint_selections}).",
+    )
 
+    parser.add_argument(
+        "--masked-fill-values",
+        type=str,
+        default="all",
+        help=f"Comma-separated list of masked fill values (default: all = {default_fillmask_vals}).",
+    )
+
+    args = parser.parse_args()
     args.output_dir.mkdir(exist_ok=True, parents=True)
+
+    # Parse keypoint selections
+    if args.keypoint_selections == "all":
+        keypoint_selections = default_keypoint_selections
+    else:
+        keypoint_selections = [s.strip() for s in args.keypoint_selections.split(",")]
+
+    # Parse masked fill values
+    if args.masked_fill_values == "all":
+        fillmask_vals = default_fillmask_vals
+    else:
+        fillmask_vals = [float(v.strip()) for v in args.masked_fill_values.split(",")]
 
     with timed_section("Dataset Loading"):
         dataset_df = combine_dataset_dfs(dataset_df_files=[args.dataset_csv], splits=["test"])
 
     query_glosses = []
     if args.query_glosses is not None:
-        for g in args.query_glosses.split(","):
-            query_glosses.append(g.strip())
-
-    keypoint_selections = [
-        "removelegsandworld",
-        "reduceholistic",
-        "hands",
-        "youtubeaslkeypoints",
-        "fingertips",
-    ]
-
-    fillmask_vals = [0.0, 10.0]
+        query_glosses = [g.strip() for g in args.query_glosses.split(",")]
 
     for keypoint_selection, masked_fill_value in itertools.product(keypoint_selections, fillmask_vals):
         scores_df = search_with_gloss_list(
@@ -303,3 +342,6 @@ if __name__ == "__main__":
             end_frame=args.end,
             out_dir=args.output_dir,
         )
+
+
+# python /opt/home/cleong/projects/pose-evaluation/pose_evaluation/evaluation/search_with_sliding_window.py "/opt/home/cleong/projects/semantic_and_visual_similarity/sign-bibles-dataset/downloads/ase/Chronological Bible Translation in American Sign Language (119 Introductions and Passages)/CBT-001-ase-3-Passage _ God Creates the World.pose" --query-glosses "GOD,HEAVEN,EARTH,DAY,MORNING,LIGHT,REFRIGERATOR,CELERY" --output-dir ./sliding_window_outputs/god_creates_the_world_short/ --end 2880 --keypoint-selections "hands,youtubeaslkeypoints,reduceholistic"
