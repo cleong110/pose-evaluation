@@ -13,6 +13,7 @@ from pose_evaluation.utils.pose_utils import (
     get_face_and_hands_from_pose,
     get_fingertip_keypoints,
     get_youtube_asl_mediapipe_keypoints,
+    interpolate_shorter_poses,
     load_pose_file,
     pose_fill_masked_or_invalid,
     pose_hide_low_conf,
@@ -432,3 +433,30 @@ def test_get_fingertips(mediapipe_poses_test_data: list["Pose"]):
         new_pose = get_fingertip_keypoints(pose)
         # frames, person, keypoints, xyz
         assert new_pose.body.data.shape[2] == 10, f"There should be 10 fingerpoints. Got {new_pose.body.data.shape}"
+
+
+def test_interpolate_shorter_poses(mediapipe_poses_test_data_refined):
+    poses = sorted(mediapipe_poses_test_data_refined, key=lambda item: item.body.data.shape[0], reverse=True)
+    # CBT-001-ase-3-Passage _ God Creates the World_frame180toframe204_including_GOD.pose
+    assert poses[-1].body.data.shape[0] == 24
+    orig_fps = poses[-1].body.fps
+
+    # 7682026298720062-GOD.pose
+    assert poses[1].body.data.shape[0] == 153
+
+    # colin-HOUSE-needs-trim.pose
+    assert poses[0].body.data.shape[0] == 172
+
+    poses = interpolate_shorter_poses(
+        [
+            mediapipe_poses_test_data_refined[0],
+            mediapipe_poses_test_data_refined[0].copy(),
+            mediapipe_poses_test_data_refined[0].copy(),
+            mediapipe_poses_test_data_refined[-1],
+        ]
+    )
+    expected_mean_frames = (172 + 172 + 24) / 3
+    assert poses[-1].body.fps >= orig_fps
+
+    assert poses[-1].body.data.shape[0] > expected_mean_frames
+    assert all(pose.body.data.shape[0] > expected_mean_frames for pose in poses)

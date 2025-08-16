@@ -294,3 +294,22 @@ def pose_slice_frames(pose: Pose | Path, start_index: int, end_index: int) -> Po
     pose.body.data = pose.body.data[start_index:end_index]
     pose.body.confidence = pose.body.confidence[start_index:end_index]
     return pose
+
+
+def interpolate_shorter_poses(poses: list[Pose], kind: str | None = None, tolerance=0.25):
+    poses = [pose.copy() for pose in poses]
+    average_frame_count = np.mean([pose.body.data.shape[0] for pose in poses])
+    min_acceptable_frame_count = average_frame_count - average_frame_count * 0.25
+    for pose in poses:
+        pose = pose.copy()
+
+        current_frame_count = len(pose.body.data)
+        current_fps = pose.body.fps
+
+        if current_frame_count < min_acceptable_frame_count:
+            # Compute new_fps to scale the frame count up to the minimum acceptable
+            scale = min_acceptable_frame_count / current_frame_count
+            new_fps = current_fps * scale
+
+            pose = pose.interpolate(new_fps=new_fps, kind=kind)
+    return poses
