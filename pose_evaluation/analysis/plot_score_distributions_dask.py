@@ -5,6 +5,7 @@ from pathlib import Path
 import dask.dataframe as dd
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 from dask.distributed import Client
 from tqdm import tqdm
@@ -73,30 +74,32 @@ def process_metric_partition_dask(metric_path: Path, output_dir: Path, bins: int
         columns=["GLOSS_A", "GLOSS_B", "SCORE"],
         engine="pyarrow",
         split_row_groups=True,
-        blocksize=None,  # respect parquet row group boundaries
+        blocksize=None,
     )
 
     metric_name = metric_path.name.replace("METRIC=", "")
 
-    # First pass: min/max of scores (lazy until compute)
+    # Global min/max across all partitions
     score_min, score_max = dd.compute(df["SCORE"].min(), df["SCORE"].max())
     if score_min == score_max:
         logging.warning("All scores equal in %s, skipping.", metric_name)
         return
 
     bin_edges = np.linspace(score_min, score_max, bins + 1)
-    in_class_hist = np.zeros(bins, dtype=np.int64)
-    out_class_hist = np.zeros(bins, dtype=np.int64)
 
-    # Second pass: process partition by partition
-    for partition in df.to_delayed():
-        part_df = dd.from_delayed([partition])
+    # Lazy: histogram per partition
+    def partition_hist(partition: "pd.DataFrame") -> tuple[np.ndarray, np.ndarray]:
+        in_class = partition.loc[partition["GLOSS_A"] == partition["GLOSS_B"], "SCORE"].to_numpy()
+        out_class = partition.loc[partition["GLOSS_A"] != partition["GLOSS_B"], "SCORE"].to_numpy()
+        in_hist, _ = np.histogram(in_class, bins=bin_edges)
+        out_hist, _ = np.histogram(out_class, bins=bin_edges)
+        return in_hist, out_hist
 
-        in_class_scores = part_df[part_df["GLOSS_A"] == part_df["GLOSS_B"]]["SCORE"].compute()
-        out_class_scores = part_df[part_df["GLOSS_A"] != part_df["GLOSS_B"]]["SCORE"].compute()
+    hists = df.map_partitions(partition_hist, meta=(None, None)).compute()
 
-        in_class_hist += np.histogram(in_class_scores, bins=bin_edges)[0]
-        out_class_hist += np.histogram(out_class_scores, bins=bin_edges)[0]
+    # Sum across partitions
+    in_class_hist = np.sum([h[0] for h in hists], axis=0)
+    out_class_hist = np.sum([h[1] for h in hists], axis=0)
 
     # Normalize to density
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
@@ -131,7 +134,7 @@ def main() -> None:
 
     client = Client(
         n_workers=args.workers,
-        threads_per_worker=1,
+        threads_per_worker=2,
         memory_limit=args.mem_limit,
     )
     logging.info("Dask client started: %s or possibly <remote URL>/gui/proxy/8787/status", client.dashboard_link)
