@@ -3,12 +3,15 @@ import logging
 from pathlib import Path
 
 import dask.dataframe as dd
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.io as pio
+import pyarrow.dataset as ds
 from dask.distributed import Client
 from tqdm import tqdm
+
+pio.kaleido.scope.mathjax = None  # https://github.com/plotly/plotly.py/issues/3469
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -18,64 +21,92 @@ def plot_and_save(
     bin_centers: np.ndarray,
     in_density: np.ndarray,
     out_density: np.ndarray,
+    in_count: int,
+    out_count: int,
     metric_name: str,
     output_dir: Path,
 ) -> None:
-    """Save both Matplotlib (PNG/PDF) and Plotly (HTML) versions of the plot."""
+    """Save Plotly plots in HTML, PNG, and PDF formats."""
     output_path = output_dir / metric_name
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # --- Matplotlib static plots ---
-    plt.figure(figsize=(10, 6))
-    plt.plot(bin_centers, out_density, label="Out-of-class", color="tab:blue")
-    plt.plot(bin_centers, in_density, label="In-class", color="tab:orange")
-    plt.title(f"Score Distribution for {metric_name}")
-    plt.xlabel("Score")
-    plt.ylabel("Density")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(output_path.with_suffix(".png"))
-    plt.savefig(output_path.with_suffix(".pdf"))
-    plt.close()
-
-    # --- Plotly interactive HTML plot ---
     fig = go.Figure()
+
+    # Out-of-class line
     fig.add_trace(
         go.Scatter(
             x=bin_centers,
             y=out_density,
             mode="lines",
-            name="Out-of-class",
+            name=f"Out-of-class (n={out_count})",
             line=dict(color="blue"),
         )
     )
+
+    # In-class line
     fig.add_trace(
         go.Scatter(
             x=bin_centers,
             y=in_density,
             mode="lines",
-            name="In-class",
+            name=f"In-class (n={in_count})",
             line=dict(color="orange"),
         )
     )
+
+    # Layout
     fig.update_layout(
         title=f"Score Distribution for {metric_name}",
         xaxis_title="Score",
         yaxis_title="Density",
         template="plotly_white",
+        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
     )
+
+    # Save outputs
     fig.write_html(output_path.with_suffix(".html"))
+    fig.write_image(output_path.with_suffix(".png"))
+    fig.write_image(output_path.with_suffix(".pdf"))
 
 
-def process_metric_partition_dask(metric_path: Path, output_dir: Path, bins: int = 100) -> None:
-    """Process a single metric partition into histograms and plots."""
-    df = dd.read_parquet(
-        str(metric_path),
-        columns=["GLOSS_A", "GLOSS_B", "SCORE"],
-        engine="pyarrow",
-        split_row_groups=True,
-        blocksize=None,
-    )
+# def process_metric_partition_dask(metric_path: Path, output_dir: Path, bins: int = 100) -> None:
+#     """Process a single metric partition into histograms and plots."""
+#     # df = dd.read_parquet(
+#     #     str(metric_path),
+#     #     columns=["GLOSS_A", "GLOSS_B", "SCORE"],
+#     #     engine="pyarrow",
+#     #     split_row_groups=True,
+#     #     blocksize=None,
+#     # )
+
+
+def process_metric_partition_dask(
+    metric_path: Path,
+    output_dir: Path,
+    bins: int = 100,
+    debug_rows: int | None = None,
+) -> None:
+    """
+    Process a single metric partition into histograms and plots.
+
+    If debug_rows is provided, only the first N rows are read eagerly with
+    PyArrow. Otherwise the full dataset is loaded lazily with Dask.
+    """
+    if debug_rows is None:
+        # Full dataset, lazily with Dask
+        df = dd.read_parquet(
+            str(metric_path),
+            columns=["GLOSS_A", "GLOSS_B", "SCORE"],
+            engine="pyarrow",
+            split_row_groups=True,
+            blocksize=None,
+        )
+    else:
+        # Quick sample via PyArrow
+        dataset = ds.dataset(metric_path, format="parquet")
+        scanner = dataset.scanner(columns=["GLOSS_A", "GLOSS_B", "SCORE"])
+        table = scanner.head(debug_rows)
+        df = dd.from_pandas(table.to_pandas(), npartitions=4)
 
     metric_name = metric_path.name.replace("METRIC=", "")
 
@@ -87,19 +118,39 @@ def process_metric_partition_dask(metric_path: Path, output_dir: Path, bins: int
 
     bin_edges = np.linspace(score_min, score_max, bins + 1)
 
-    # Lazy: histogram per partition
-    def partition_hist(partition: "pd.DataFrame") -> tuple[np.ndarray, np.ndarray]:
+    # Lazy histogram per partition
+    def partition_hist(partition: pd.DataFrame) -> pd.Series:
         in_class = partition.loc[partition["GLOSS_A"] == partition["GLOSS_B"], "SCORE"].to_numpy()
         out_class = partition.loc[partition["GLOSS_A"] != partition["GLOSS_B"], "SCORE"].to_numpy()
         in_hist, _ = np.histogram(in_class, bins=bin_edges)
         out_hist, _ = np.histogram(out_class, bins=bin_edges)
-        return in_hist, out_hist
+        return pd.Series(
+            {
+                "in_hist": in_hist,
+                "out_hist": out_hist,
+                "in_count": len(in_class),
+                "out_count": len(out_class),
+            }
+        )
 
-    hists = df.map_partitions(partition_hist, meta=(None, None)).compute()
+    meta = pd.Series(
+        {
+            "in_hist": np.array([], dtype=int),
+            "out_hist": np.array([], dtype=int),
+            "in_count": 0,
+            "out_count": 0,
+        }
+    )
 
-    # Sum across partitions
-    in_class_hist = np.sum([h[0] for h in hists], axis=0)
-    out_class_hist = np.sum([h[1] for h in hists], axis=0)
+    hists = df.map_partitions(partition_hist, meta=meta).compute()
+    # Ensure hists is always a DataFrame
+
+    # Sum across partitions (stack arrays to avoid object-dtype issues)
+    in_class_hist = np.sum(np.stack(hists["in_hist"]), axis=0)
+    out_class_hist = np.sum(np.stack(hists["out_hist"]), axis=0)
+
+    in_count = int(hists["in_count"].sum())
+    out_count = int(hists["out_count"].sum())
 
     # Normalize to density
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
@@ -107,7 +158,15 @@ def process_metric_partition_dask(metric_path: Path, output_dir: Path, bins: int
     out_density = out_class_hist / np.sum(out_class_hist) / np.diff(bin_edges)
 
     # Save plots
-    plot_and_save(bin_centers, in_density, out_density, metric_name, output_dir)
+    plot_and_save(
+        bin_centers,
+        in_density,
+        out_density,
+        in_count,
+        out_count,
+        metric_name,
+        output_dir,
+    )
 
 
 def main() -> None:
