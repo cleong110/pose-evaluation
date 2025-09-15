@@ -152,6 +152,16 @@ def process_metric_partition_dask(
     in_count = int(hists["in_count"].sum())
     out_count = int(hists["out_count"].sum())
 
+    # Save the histograms to a file
+    hists_path = output_dir / f"hists_{metric_name}.npz"
+    np.savez(
+        hists_path,
+        bin_edges=bin_edges,
+        in_class_hist=in_class_hist,
+        out_class_hist=out_class_hist,
+    )
+    logging.info("Saved histograms for %s to %s", metric_name, hists_path)
+
     # Normalize to density
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
     in_density = in_class_hist / np.sum(in_class_hist) / np.diff(bin_edges)
