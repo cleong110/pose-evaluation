@@ -11,6 +11,10 @@ import pyarrow.dataset as ds
 from dask.distributed import Client
 from tqdm import tqdm
 
+from pose_evaluation.evaluation.interpret_name import (
+    descriptive_name,
+)
+
 pio.kaleido.scope.mathjax = None  # https://github.com/plotly/plotly.py/issues/3469
 
 # Configure logging
@@ -56,28 +60,17 @@ def plot_and_save(
 
     # Layout
     fig.update_layout(
-        title=f"Score Distribution for {metric_name}",
+        title=f"Score Distribution for {descriptive_name(metric_name)}",
         xaxis_title="Score",
         yaxis_title="Density",
         template="plotly_white",
-        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+        # legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
     )
 
     # Save outputs
     fig.write_html(output_path.with_suffix(".html"))
     fig.write_image(output_path.with_suffix(".png"))
     fig.write_image(output_path.with_suffix(".pdf"))
-
-
-# def process_metric_partition_dask(metric_path: Path, output_dir: Path, bins: int = 100) -> None:
-#     """Process a single metric partition into histograms and plots."""
-#     # df = dd.read_parquet(
-#     #     str(metric_path),
-#     #     columns=["GLOSS_A", "GLOSS_B", "SCORE"],
-#     #     engine="pyarrow",
-#     #     split_row_groups=True,
-#     #     blocksize=None,
-#     # )
 
 
 def process_metric_partition_dask(
@@ -87,7 +80,10 @@ def process_metric_partition_dask(
     debug_rows: int | None = None,
 ) -> None:
     """
-    Process a single metric partition into histograms and plots.
+    Process a single metric partition into histograms, plots, and a stats table.
+
+    This version is optimized to compute all necessary statistics in a single pass
+    and removes redundant count calculations.
 
     If debug_rows is provided, only the first N rows are read eagerly with
     PyArrow. Otherwise the full dataset is loaded lazily with Dask.
@@ -106,12 +102,18 @@ def process_metric_partition_dask(
         dataset = ds.dataset(metric_path, format="parquet")
         scanner = dataset.scanner(columns=["GLOSS_A", "GLOSS_B", "SCORE"])
         table = scanner.head(debug_rows)
-        df = dd.from_pandas(table.to_pandas(), npartitions=4)
+        df = dd.from_pandas(table.to_pandas(), npartitions=10)
 
     metric_name = metric_path.name.replace("METRIC=", "")
 
-    # Global min/max across all partitions
+    # Get scores for each class
+    in_class_scores = df.loc[df["GLOSS_A"] == df["GLOSS_B"], "SCORE"]
+    out_class_scores = df.loc[df["GLOSS_A"] != df["GLOSS_B"], "SCORE"]
+
+    # Compute global min/max eagerly to define histogram bins.
+    # We must do this first and separately.
     score_min, score_max = dd.compute(df["SCORE"].min(), df["SCORE"].max())
+
     if score_min == score_max:
         logging.warning("All scores equal in %s, skipping.", metric_name)
         return
@@ -128,31 +130,35 @@ def process_metric_partition_dask(
             {
                 "in_hist": in_hist,
                 "out_hist": out_hist,
-                "in_count": len(in_class),
-                "out_count": len(out_class),
             }
         )
 
-    meta = pd.Series(
+    # Meta for histogram output
+    meta_hist = pd.Series(
         {
             "in_hist": np.array([], dtype=int),
             "out_hist": np.array([], dtype=int),
-            "in_count": 0,
-            "out_count": 0,
         }
     )
 
-    hists = df.map_partitions(partition_hist, meta=meta).compute()
-    # Ensure hists is always a DataFrame
+    # Lazily build a graph of all computations
+    hists_lazy = df.map_partitions(partition_hist, meta=meta_hist)
 
-    # Sum across partitions (stack arrays to avoid object-dtype issues)
-    in_class_hist = np.sum(np.stack(hists["in_hist"]), axis=0)
-    out_class_hist = np.sum(np.stack(hists["out_hist"]), axis=0)
+    in_stats_lazy = in_class_scores.describe()
+    out_stats_lazy = out_class_scores.describe()
 
-    in_count = int(hists["in_count"].sum())
-    out_count = int(hists["out_count"].sum())
+    # Now, compute everything at once
+    hists_result, in_stats_result, out_stats_result = dd.compute(hists_lazy, in_stats_lazy, out_stats_lazy)
 
-    # Save the histograms to a file
+    # Process histogram results
+    in_class_hist = np.sum(np.stack(hists_result["in_hist"]), axis=0)
+    out_class_hist = np.sum(np.stack(hists_result["out_hist"]), axis=0)
+
+    # Get the counts from the describe() results
+    in_count = in_stats_result["count"]
+    out_count = out_stats_result["count"]
+
+    # Save the histograms
     hists_path = output_dir / f"hists_{metric_name}.npz"
     np.savez(
         hists_path,
@@ -162,12 +168,11 @@ def process_metric_partition_dask(
     )
     logging.info("Saved histograms for %s to %s", metric_name, hists_path)
 
-    # Normalize to density
+    # Normalize to density and plot
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
     in_density = in_class_hist / np.sum(in_class_hist) / np.diff(bin_edges)
     out_density = out_class_hist / np.sum(out_class_hist) / np.diff(bin_edges)
 
-    # Save plots
     plot_and_save(
         bin_centers,
         in_density,
@@ -176,6 +181,24 @@ def process_metric_partition_dask(
         out_count,
         metric_name,
         output_dir,
+    )
+
+    # Generate and save a LaTeX stats table
+    stats_df = pd.DataFrame({"In-Class": in_stats_result, "Out-Class": out_stats_result})
+
+    latex_table = stats_df.to_latex(
+        float_format="%.4f",
+        caption=f"Statistics for {metric_name.replace('_', ' ')} Scores",
+        label=f"tab:stats_{metric_name}",
+        bold_rows=True,
+        column_format="l|cc",
+    )
+
+    latex_path = output_dir / f"stats_{metric_name}.tex"
+    with open(latex_path, "w", encoding="utf-8") as f:
+        f.write(latex_table)
+    logging.info(
+        "Saved LaTeX stats table for %s aka %s, to %s", metric_name, descriptive_name(metric_name), latex_path.resolve()
     )
 
 
@@ -189,7 +212,7 @@ def main() -> None:
         help="Output directory",
     )
     parser.add_argument("--bins", type=int, default=100, help="Number of histogram bins")
-    parser.add_argument("--workers", type=int, default=30, help="Number of Dask workers")
+    parser.add_argument("--workers", type=int, default=5, help="Number of Dask workers")
     parser.add_argument(
         "--mem-limit",
         type=str,
@@ -200,6 +223,7 @@ def main() -> None:
 
     root = Path(args.dataset_path)
     output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     client = Client(
         n_workers=args.workers,
