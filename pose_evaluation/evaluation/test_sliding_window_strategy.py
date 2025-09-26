@@ -3,12 +3,12 @@ from pathlib import Path
 import pytest
 from pose_format import Pose
 
-from pose_evaluation.evaluation.sliding_window import FixedWindowsSetByQueryMeanLengths
+from pose_evaluation.evaluation.sliding_window import FixedWindowsSetByQueryMeanLengthsStrategy
 
 
 @pytest.mark.parametrize("mean_query_len", [8, 9, 12, 13, 20])
 def test_fixed_window_generates_valid_windows(real_pose_file_paths: list[Path], mean_query_len: int):
-    strategy = FixedWindowsSetByQueryMeanLengths(mean_query_pose_length=mean_query_len)
+    strategy = FixedWindowsSetByQueryMeanLengthsStrategy(mean_query_pose_length=mean_query_len)
 
     for pose_path in real_pose_file_paths:
         pose = Pose.read(pose_path.read_bytes())
